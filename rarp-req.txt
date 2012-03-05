@@ -1,0 +1,68 @@
+/*
+	This was captured from a sun Ultra 60
+
+	Frame 1312 (64 bytes on wire, 64 bytes captured)
+	    Arrival Time: Mar  4, 2012 17:53:32.029171000
+	    [Time delta from previous captured frame: 18.247146000 seconds]
+	    [Time delta from previous displayed frame: 18.247146000 seconds]
+	    [Time since reference or first frame: 2843.490081000 seconds]
+	    Frame Number: 1312
+	    Frame Length: 64 bytes
+	    Capture Length: 64 bytes
+	    [Frame is marked: False]
+	    [Protocols in frame: eth:arp]
+	    [Coloring Rule Name: ARP]
+	    [Coloring Rule String: arp]
+	Ethernet II, Src: Oracle_a9:34:df (08:00:20:a9:34:df), Dst: Broadcast (ff:ff:ff:ff:ff:ff)
+	    Destination: Broadcast (ff:ff:ff:ff:ff:ff)
+		Address: Broadcast (ff:ff:ff:ff:ff:ff)
+		.... ...1 .... .... .... .... = IG bit: Group address (multicast/broadcast)
+		.... ..1. .... .... .... .... = LG bit: Locally administered address (this is NOT the factory default)
+	    Source: Oracle_a9:34:df (08:00:20:a9:34:df)
+		Address: Oracle_a9:34:df (08:00:20:a9:34:df)
+		.... ...0 .... .... .... .... = IG bit: Individual address (unicast)
+		.... ..0. .... .... .... .... = LG bit: Globally unique address (factory default)
+	    Type: RARP (0x8035)
+	    Trailer: FEFDFBF7EFDFBF7F55AA0102040810204080
+	    Frame check sequence: 0x00000000 [incorrect, should be 0x30d48361]
+	Address Resolution Protocol (reverse request)
+	    Hardware type: Ethernet (0x0001)
+	    Protocol type: IP (0x0800)
+	    Hardware size: 6
+	    Protocol size: 4
+	    Opcode: reverse request (0x0003)
+	    [Is gratuitous: False]
+	    Sender MAC address: Oracle_a9:34:df (08:00:20:a9:34:df)
+	    Sender IP address: 255.255.255.255 (255.255.255.255)
+	    Target MAC address: Oracle_a9:34:df (08:00:20:a9:34:df)
+	    Target IP address: 255.255.255.255 (255.255.255.255)
+
+	0000  ff ff ff ff ff ff 08 00 20 a9 34 df 80 35 00 01   ........ .4..5..
+	0010  08 00 06 04 00 03 08 00 20 a9 34 df ff ff ff ff   ........ .4.....
+	0020  08 00 20 a9 34 df ff ff ff ff fe fd fb f7 ef df   .. .4...........
+	0030  bf 7f 55 aa 01 02 04 08 10 20 40 80 00 00 00 00   ..U...... @.....
+*/
+
+char pkt1312[] = {
+	/* ethernet header */
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, /* dst mac */
+	0x08, 0x00, 0x20, 0xa9, 0x34, 0xdf, /* src mac */
+	0x80, 0x35,		/* Ether Type */
+
+	/* rarp (rfc 903) */
+	0x00, 0x01, 		/* ar$hrd (hardware address space) Ethernet 0x0001 */
+	0x08, 0x00,		/* ar$pro (protocol address space) IP(v4) 0x0800 */
+	0x06,			/* ar$hln (hardware address length) */
+	0x04,			/* ar$pln (protocol address length) */
+	0x00, 0x03,		/* ar$op  (opcode) */
+
+	0x08, 0x00, 0x20, 0xa9, 0x34, 0xdf,	/* ar$sha (source hardware address) */
+	0xff, 0xff, 0xff, 0xff,			/* ar$spa (source protocol address) */
+	0x08, 0x00, 0x20, 0xa9, 0x34, 0xdf,	/* ar$tha (target hardware address) */
+	0xff, 0xff, 0xff, 0xff,			/* ar$tpa (target protocol address) */
+
+	/* ??? */
+	0xfe, 0xfd, 0xfb, 0xf7, /* CRC32 */
+	0xef, 0xdf, 0xbf, 0x7f, 0x55, 0xaa, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20,
+	0x40, 0x80, 0x00, 0x00, 0x00, 0x00 };
+
