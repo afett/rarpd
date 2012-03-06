@@ -1,0 +1,25 @@
+* sanity checks on the request
+
+* do ll_address lookup ether_ntohost(3) and do the getaddrinfo(3) dance with appropriate
+  options
+
+* arp cache management via netlink (beware of tainted data)
+
+* supply an answer 
+
+* identify possibly blocking io and use nonblocking socket io
+
+* factor out the netlink handling and check it for error handling
+
+* commandline options, at least rarpd [-adflt] if0 [... ifN] (see OpenBSD rarpd(8))
+  should be supported.
+
+* daemonize and write pidfile
+
+* some kind of priviledge seperation ie. fork for arp cache management, pass the open
+  fds to an unprivileged process.
+
+* use capabilities (7) CAP_NET_RAW for socket handling and CAP_NET_ADMIN for arp cache,
+  drop all others
+
+* signal handling (is this necessary ?)
