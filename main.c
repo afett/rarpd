@@ -34,6 +34,7 @@
 #include <string.h>
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <ifaddrs.h>
 #include <linux/if.h>
 #include <linux/netlink.h>
@@ -457,6 +458,25 @@ void rarpd_add_pollfd(struct rarpd *rarpd, int fd)
 	++rarpd->nfds;
 }
 
+int open_socket()
+{
+	int fd;
+
+	fd = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_RARP));
+	if (fd < 0) {
+		XLOG_ERR("error opening socket %s", strerror(errno));
+		return -1;
+	}
+
+	if (fcntl(fd, F_SETFL, O_NONBLOCK) != 0) {
+		XLOG_ERR("error setting socket nonblocking %s", strerror(errno));
+		close(fd);
+		return -1;
+	}
+
+	return fd;
+}
+
 int setup_links(struct rarpd *rarpd)
 {
 	int i, fd;
@@ -464,21 +484,17 @@ int setup_links(struct rarpd *rarpd)
 	rarpd->fds = malloc(rarpd->link_count * sizeof(struct pollfd));
 
 	for (i = 0; i < rarpd->link_count; ++i) {
-		fd = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_RARP));
+		fd = open_socket();
 		if (fd < 0) {
-			XLOG_ERR("error opening socket on %s: %s",
-				rarpd->link[i].name, strerror(errno));
-			return -1;
+			goto err;
 		}
 
 		if (do_bind(fd, rarpd->link[i].index) != 0) {
-			close(fd);
-			return -1;
+			goto err;
 		}
 
 		if (set_promisc(fd, rarpd->link[i].index) != 0) {
-			close(fd);
-			return -1;
+			goto err;
 		}
 
 		rarpd->link[i].fd = fd;
@@ -486,6 +502,10 @@ int setup_links(struct rarpd *rarpd)
 	}
 
 	return 0;
+err:
+	close(fd);
+	XLOG_ERR("error setting up %s", rarpd->link[i].name);
+	return -1;
 }
 
 struct link* find_link_by_fd(int fd, struct link* link, size_t size)
