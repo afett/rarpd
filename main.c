@@ -42,6 +42,7 @@
 #include <net/ethernet.h>
 #include <net/if_arp.h>
 #include <netinet/in.h>
+#include <netinet/ether.h>
 #include <netpacket/packet.h>
 #include <poll.h>
 #include <sys/socket.h>
@@ -61,7 +62,8 @@
 struct link {
 	size_t index;
 	char name[IFNAMSIZ + 1];
-	in_addr_t addr;
+	in_addr_t in_addr;
+	struct ether_addr ether_addr;
 	int fd;
 };
 
@@ -83,7 +85,7 @@ struct rarpd {
 
 struct nl_cb;
 
-typedef void (*nl_link_cb)(int, unsigned short, unsigned int, const char *, void *);
+typedef void (*nl_link_cb)(int, unsigned short, unsigned int, const struct ether_addr *, const char *, void *);
 typedef void (*nl_addr_cb)(int, in_addr_t, void *);
 typedef void (*nl_msg_parse)(struct nlmsghdr *nlp, struct nl_cb *);
 
@@ -170,7 +172,7 @@ int nl_list_links(struct nl_ctx *nl_ctx)
 	return 0;
 }
 
-void add_link(int ifindex, unsigned short iftype, unsigned int ifflags, const char *name, void *aux)
+void add_link(int ifindex, unsigned short iftype, unsigned int ifflags, const struct ether_addr *addr, const char *name, void *aux)
 {
 	struct rarpd *rarpd;
 	struct link *link;
@@ -185,14 +187,15 @@ void add_link(int ifindex, unsigned short iftype, unsigned int ifflags, const ch
 		return;
 	}
 
-	XLOG_INFO("adding link %s", name);
+	XLOG_INFO("adding link %s: %s", name, ether_ntoa(addr));
 	rarpd = (struct rarpd *) aux;
 	++rarpd->link_count;
 	rarpd->link = realloc(rarpd->link, rarpd->link_count * sizeof(struct link));
 	link = &rarpd->link[rarpd->link_count - 1];
 	link->index = ifindex;
 	snprintf(link->name, sizeof(link->name), "%s", name);
-	link->addr = 0;
+	memcpy(&link->ether_addr, addr, sizeof(struct ether_addr));
+	link->in_addr = 0;
 }
 
 void nl_parse_link_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
@@ -201,19 +204,29 @@ void nl_parse_link_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 	struct ifinfomsg *ifinfo;
 	struct rtattr *rtap;
 	char *name;
+	struct ether_addr *addr;
 	size_t len;
 
 	name = NULL;
+	addr = NULL;
 	ifinfo = NLMSG_DATA(nlp);
 	rtap = IFLA_RTA(ifinfo);
 	len = IFLA_PAYLOAD(nlp);
 
-	for (; RTA_OK(rtap, len) && !name; rtap = RTA_NEXT(rtap, len)) {
+	for (; RTA_OK(rtap, len); rtap = RTA_NEXT(rtap, len)) {
 		switch (rtap->rta_type) {
 		case IFLA_IFNAME:
 			name = (char *)RTA_DATA(rtap);
 			break;
+		case IFLA_ADDRESS:
+			if (RTA_PAYLOAD(rtap) != sizeof(struct ether_addr)) {
+				XLOG_ERR("invalid ll address for %u", ifinfo->ifi_index);
+				return;
+			}
+			addr = (struct ether_addr *)RTA_DATA(rtap);
+			break;
 		default:
+			/* XLOG_DEBUG("attr: %u", rtap->rta_type); */
 			break;
 		}
 	}
@@ -223,8 +236,13 @@ void nl_parse_link_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 		return;
 	}
 
+	if (!addr) {
+		XLOG_ERR("could not get ll addr for link %u", ifinfo->ifi_index);
+		return;
+	}
+
 	link_cb = (nl_link_cb) cb->parse_cb;
-	link_cb(ifinfo->ifi_index, ifinfo->ifi_type, ifinfo->ifi_flags, name, cb->aux);
+	link_cb(ifinfo->ifi_index, ifinfo->ifi_type, ifinfo->ifi_flags, addr, name, cb->aux);
 }
 
 
@@ -243,15 +261,15 @@ void link_add_addr(int ifindex, in_addr_t addr, void *aux)
 		}
 
 		inet_ntop(AF_INET, &addr, addrstr, sizeof(addrstr));
-		if (rarpd->link[i].addr != 0) {
-			inet_ntop(AF_INET, &rarpd->link[i].addr, used, sizeof(used));
+		if (rarpd->link[i].in_addr != 0) {
+			inet_ntop(AF_INET, &rarpd->link[i].in_addr, used, sizeof(used));
 			XLOG_WARNING("ignoring address %s for link %s using %s",
 				addrstr, rarpd->link[i].name, used);
 			continue;
 		}
 
 		XLOG_INFO("using address %s for link %s", addrstr, rarpd->link[i].name);
-		rarpd->link[i].addr = addr;
+		rarpd->link[i].in_addr = addr;
 	}
 }
 
@@ -367,13 +385,35 @@ int get_addresses(struct rarpd *rarpd)
 	return nl_receive(&rarpd->nl_ctx, &addr_cb);
 }
 
+int nl_set_neigh(struct nl_ctx *nl_ctx, size_t index, struct ether_addr *ether_addr, in_addr_t *in_addr)
+{
+	int ret;
+	size_t size;
+	char buf[1024];
+
+	size = nl_create_msg(buf, sizeof(buf), RTM_NEWNEIGH,
+		NLM_F_REQUEST|NLM_F_REPLACE|NLM_F_CREATE, PF_INET);
+	// nl_add_attr((struct nlmsghdr *) data, NDA_DST, sizeof(in_addr_r), in_addr);
+	// nl_add_attr((struct nlmsghdr *) data, NDA_LLADDR, sizeof(struct ether_addr), ether_addr);
+	// fill in ndm_ifindex from link
+	// set ndm_state NUD_PERMANENT
+
+	ret = send(nl_ctx->fd, buf, size, 0);
+	if (ret != size) {
+		XLOG_ERR("error sending netlink message: %s", strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
 void filter_links(struct rarpd *rarpd)
 {
 	int i;
 
 	i = 0;
 	while (i < rarpd->link_count) {
-		if (rarpd->link[i].addr != 0) {
+		if (rarpd->link[i].in_addr != 0) {
 			++i;
 			continue;
 		}
