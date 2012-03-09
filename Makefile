@@ -1,7 +1,7 @@
 TARGET=rarpd
 
 CFLAGS=-std=c99 -g -O0 -Wall -Werror
-CPPFLAGS=
+CPPFLAGS=-D_XOPEN_SOURCE=600
 LDFLAGS=
 
 SRC=$(wildcard *.c)
