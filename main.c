@@ -26,6 +26,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,13 +34,16 @@
 
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <linux/if.h>
 #include <net/ethernet.h>
 #include <net/if.h>
+#include <net/if_arp.h>
 #include <netinet/ether.h>
+#include <netinet/if_ether.h>
+#include <netinet/in.h>
 #include <netpacket/packet.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "xlog.h"
@@ -60,9 +64,6 @@ struct rarpd {
 	nfds_t nfds;
 	struct pollfd *fds;
 };
-
-#define ARPHRD_ETHER	1
-#define ETH_P_RARP      0x8035
 
 void add_link(int ifindex, unsigned short iftype, unsigned int ifflags, const struct ether_addr *addr, const char *name, void *aux)
 {
@@ -290,13 +291,108 @@ void dump_packet(char *buf, size_t size)
 	}
 }
 
+bool check_frame(struct sockaddr_ll *addr, struct link *link)
+{
+	if (addr->sll_protocol != ETH_P_RARP) {
+		XLOG_INFO("frame check failed: no RARP packet");
+		return false;
+	}
+
+	if (addr->sll_ifindex != link->index) {
+		XLOG_INFO("frame check failed: wrong interface");
+		return false;
+	}
+
+	if (addr->sll_hatype != ARPHRD_ETHER) {
+		XLOG_INFO("frame check failed: no ethernet");
+		return false;
+	}
+
+	if (addr->sll_pkttype != PACKET_BROADCAST) {
+		XLOG_INFO("frame check failed: no broadcast");
+		return false;
+	}
+
+	if (addr->sll_halen != sizeof(struct ether_addr)) {
+		XLOG_INFO("frame check failed: bad source address length");
+		return false;
+	}
+
+	return true;
+}
+
+bool check_request(struct link* link, struct sockaddr_ll *addr, char *buf, ssize_t size)
+{
+	struct ether_arp *req;
+
+	if (size < sizeof(struct ether_arp)) {
+		XLOG_INFO("check request: request to short");
+		return false;
+	}
+
+	req = (struct ether_arp *) buf;
+	if (req->ea_hdr.ar_hrd != ARPHRD_ETHER) {
+		XLOG_INFO("check request: invalid hardware address");
+		return false;
+	}
+
+	if (req->ea_hdr.ar_pro != ETHERTYPE_IP) {
+		XLOG_INFO("check request: invalid ethertype");
+		return false;
+	}
+
+	if (req->ea_hdr.ar_hln != ETH_ALEN) {
+		XLOG_INFO("check request: invalid hardware address length");
+		return false;
+	}
+
+	if (req->ea_hdr.ar_pln != sizeof(in_addr_t)) {
+		XLOG_INFO("check request: invalid protocol address length");
+		return false;
+	}
+
+	if (req->ea_hdr.ar_op != ARPOP_RREQUEST) {
+		XLOG_INFO("check request: invalid rarp opcode");
+		return false;
+	}
+
+	return true;
+}
+
+void read_request(struct link* link)
+{
+	ssize_t ret;
+	char buf[1500];
+	struct sockaddr_ll addr;
+	socklen_t addrlen;
+
+	memset(buf, 0, sizeof(buf));
+	memset(&addr, 0, sizeof(addr));
+	addrlen = sizeof(addr);
+
+	ret = recvfrom(link->fd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
+	if (ret < 0) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			return;
+		}
+		XLOG_ERR("read error on %s: %s", link->name, strerror(errno));
+	}
+
+	XLOG_DEBUG("read %i octets", ret);
+	if (!check_frame(&addr, link)) {
+		return;
+	}
+
+	if (!check_request(link, &addr, buf, ret)) {
+		return;
+	}
+}
+
 void dispatch_requests(struct rarpd *rarpd, int events)
 {
 	int i;
-	int ret;
 	int processed;
 	struct link *link;
-	char buf[1500];
 
 	processed = 0;
 	for (i = 0; i < rarpd->nfds; ++i) {
@@ -311,14 +407,8 @@ void dispatch_requests(struct rarpd *rarpd, int events)
 		}
 
 		XLOG_ERR("received poll event for %s", link->name);
-		memset(buf, 0, sizeof(buf));
-		ret = read(link->fd, buf, sizeof(buf));
-		if (ret < 0) {
-			XLOG_ERR("read error on %s: %s", link->name, strerror(errno));
-		}
-
-		XLOG_DEBUG("read %i octets", ret);
-		dump_packet(buf, ret);
+		read_request(link);
+		rarpd->fds[i].revents = 0;
 
 		if (++processed == events) {
 			return;
