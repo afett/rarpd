@@ -22,7 +22,7 @@ typedef void (*nl_msg_parse)(struct nlmsghdr *nlp, struct nl_cb *);
 struct nl_cb {
 	uint16_t msg_type;
 	nl_msg_parse parse_msg;
-	void *parse_cb;
+	void (*parse_cb)(void);
 	void *aux;
 };
 

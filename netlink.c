@@ -93,7 +93,7 @@ void nl_init_link_cb(struct nl_cb *nl_cb, nl_link_cb link_cb, void *aux)
 {
 	nl_cb->msg_type = RTM_NEWLINK;
 	nl_cb->parse_msg = nl_parse_link_msg;
-	nl_cb->parse_cb = link_cb;
+	nl_cb->parse_cb = (void(*)(void)) link_cb;
 	nl_cb->aux = aux;
 }
 
@@ -117,7 +117,7 @@ void nl_init_addr_cb(struct nl_cb *nl_cb, nl_addr_cb addr_cb, void *aux)
 {
 	nl_cb->msg_type = RTM_NEWADDR;
 	nl_cb->parse_msg = nl_parse_addr_msg;
-	nl_cb->parse_cb = addr_cb;
+	nl_cb->parse_cb = (void(*)(void)) addr_cb;
 	nl_cb->aux = aux;
 }
 
