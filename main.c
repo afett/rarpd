@@ -50,7 +50,7 @@
 #include "netlink.h"
 
 struct link {
-	size_t index;
+	int ifindex;
 	char name[IF_NAMESIZE + 1];
 	in_addr_t in_addr;
 	struct ether_addr ether_addr;
@@ -85,7 +85,7 @@ void add_link(int ifindex, unsigned short iftype, unsigned int ifflags, const st
 	++rarpd->link_count;
 	rarpd->link = realloc(rarpd->link, rarpd->link_count * sizeof(struct link));
 	link = &rarpd->link[rarpd->link_count - 1];
-	link->index = ifindex;
+	link->ifindex = ifindex;
 	snprintf(link->name, sizeof(link->name), "%s", name);
 	memcpy(&link->ether_addr, addr, sizeof(struct ether_addr));
 	link->in_addr = 0;
@@ -93,7 +93,7 @@ void add_link(int ifindex, unsigned short iftype, unsigned int ifflags, const st
 
 void link_add_addr(int ifindex, in_addr_t addr, void *aux)
 {
-	int i;
+	size_t i;
 	struct rarpd *rarpd;
 	char addrstr[INET_ADDRSTRLEN];
 	char used[INET_ADDRSTRLEN];
@@ -101,7 +101,7 @@ void link_add_addr(int ifindex, in_addr_t addr, void *aux)
 	rarpd = (struct rarpd *) aux;
 
 	for (i = 0; i < rarpd->link_count; ++i) {
-		if (rarpd->link[i].index != ifindex) {
+		if (rarpd->link[i].ifindex != ifindex) {
 			continue;
 		}
 
@@ -132,7 +132,7 @@ int get_addresses(struct rarpd *rarpd)
 
 void filter_links(struct rarpd *rarpd)
 {
-	int i;
+	size_t i;
 
 	i = 0;
 	while (i < rarpd->link_count) {
@@ -238,7 +238,8 @@ int open_socket()
 
 int setup_links(struct rarpd *rarpd)
 {
-	int i, fd;
+	size_t i;
+	int fd;
 
 	rarpd->fds = malloc(rarpd->link_count * sizeof(struct pollfd));
 
@@ -248,11 +249,11 @@ int setup_links(struct rarpd *rarpd)
 			goto err;
 		}
 
-		if (do_bind(fd, rarpd->link[i].index) != 0) {
+		if (do_bind(fd, rarpd->link[i].ifindex) != 0) {
 			goto err;
 		}
 
-		if (set_promisc(fd, rarpd->link[i].index) != 0) {
+		if (set_promisc(fd, rarpd->link[i].ifindex) != 0) {
 			goto err;
 		}
 
@@ -269,7 +270,7 @@ err:
 
 struct link* find_link_by_fd(int fd, struct link* link, size_t size)
 {
-	int i;
+	size_t i;
 	for (i = 0; i < size; ++i) {
 		if (link[i].fd == fd) {
 			return &link[i];
@@ -281,7 +282,7 @@ struct link* find_link_by_fd(int fd, struct link* link, size_t size)
 
 void dump_packet(char *buf, size_t size)
 {
-	int i;
+	size_t i;
 
 	for (i = 0; i < size; ++i) {
 		fprintf(stderr, "%02x ", (unsigned char) buf[i]);
@@ -298,7 +299,7 @@ bool check_frame(struct sockaddr_ll *addr, struct link *link)
 		return false;
 	}
 
-	if (addr->sll_ifindex != link->index) {
+	if (addr->sll_ifindex != link->ifindex) {
 		XLOG_INFO("frame check failed: wrong interface");
 		return false;
 	}
@@ -321,11 +322,11 @@ bool check_frame(struct sockaddr_ll *addr, struct link *link)
 	return true;
 }
 
-bool check_request(struct link* link, struct sockaddr_ll *addr, char *buf, ssize_t size)
+bool check_request(char *buf, ssize_t size)
 {
 	struct ether_arp *req;
 
-	if (size < sizeof(struct ether_arp)) {
+	if ((size_t) size < sizeof(struct ether_arp)) {
 		XLOG_INFO("check request: request to short");
 		return false;
 	}
@@ -383,14 +384,14 @@ void read_request(struct link* link)
 		return;
 	}
 
-	if (!check_request(link, &addr, buf, ret)) {
+	if (!check_request(buf, ret)) {
 		return;
 	}
 }
 
 void dispatch_requests(struct rarpd *rarpd, int events)
 {
-	int i;
+	nfds_t i;
 	int processed;
 	struct link *link;
 
@@ -433,6 +434,9 @@ void handle_requests(struct rarpd *rarpd)
 
 int main(int argc, char *argv[])
 {
+	(void) argc;
+	(void) argv;
+
 	struct rarpd rarpd;
 
 	rarpd.link_count = 0;
