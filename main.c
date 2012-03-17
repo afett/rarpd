@@ -37,6 +37,7 @@
 #include <net/ethernet.h>
 #include <net/if.h>
 #include <net/if_arp.h>
+#include <netdb.h>
 #include <netinet/ether.h>
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
@@ -379,12 +380,60 @@ ssize_t read_request(int fd, struct sockaddr_ll *addr, char *buf, size_t size)
 	return ret;
 }
 
+/*
+   This may (and will) block.
+   Use local /etc/ethers and /etc/hosts
+   to avoid NIS and DNS queries.
+ */
+int resolve(struct ether_addr *addr, struct in_addr *in_addr)
+{
+	int ret;
+	char hostname[4096];
+	struct addrinfo *ai, hints;
+	struct sockaddr_in *sa;
+
+	memset(hostname, 0, sizeof(hostname));
+	/*
+	   This is not really safe, at the time of
+	   writing glibc uses a 1024 byte buffer
+	   for the answer internally ...
+	   We could parse /etc/ethers by ourselves
+	   but then we would loose nsswitch support.
+	   Alas RARP support without NIS is no fun :-(
+	*/
+	ret = ether_ntohost(hostname, addr);
+	if (ret != 0) {
+		XLOG_INFO("failed to lookup %s", ether_ntoa(addr));
+		return -1;
+	}
+
+	XLOG_DEBUG("lookup for %s returned %s", ether_ntoa(addr), hostname);
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_flags = AI_ADDRCONFIG;
+	ai = NULL;
+	ret = getaddrinfo(hostname, NULL, &hints, &ai);
+	if (ret != 0) {
+		XLOG_INFO("could not resolve '%s': %s\n", hostname,
+			ret == EAI_SYSTEM ? strerror(errno) : gai_strerror(ret));
+		return -1;
+	}
+
+	sa = (struct sockaddr_in *)(ai->ai_addr);
+	memcpy(in_addr, &(sa->sin_addr), sizeof(struct in_addr));
+
+	return 0;
+}
 
 void handle_request(struct link *link)
 {
+	int ret;
 	ssize_t size;
 	char buf[1500];
 	struct sockaddr_ll addr;
+	struct ether_arp *arp_req;
+	struct in_addr ip;
 
 	memset(buf, 0, sizeof(buf));
 	memset(&addr, 0, sizeof(addr));
@@ -403,9 +452,18 @@ void handle_request(struct link *link)
 		return;
 	}
 
-	if (!check_request((struct ether_arp *)buf, &addr)) {
+	arp_req = (struct ether_arp *)buf;
+	if (!check_request(arp_req, &addr)) {
 		return;
 	}
+
+	memset(&ip, 0, sizeof(in_addr_t));
+	ret = resolve((struct ether_addr*)&arp_req->arp_tha, &ip);
+	if (ret != 0) {
+		return;
+	}
+
+	XLOG_INFO("found address: %s", inet_ntoa(ip));
 }
 
 void dispatch_requests(struct rarpd *rarpd, int events)
