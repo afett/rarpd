@@ -66,7 +66,8 @@ struct rarpd {
 	struct pollfd *fds;
 };
 
-void add_link(int ifindex, unsigned short iftype, unsigned int ifflags, const struct ether_addr *addr, const char *name, void *aux)
+void add_link(int ifindex, unsigned short iftype, unsigned int ifflags,
+	const struct ether_addr *addr, const char *name, void *aux)
 {
 	struct rarpd *rarpd;
 	struct link *link;
@@ -84,7 +85,8 @@ void add_link(int ifindex, unsigned short iftype, unsigned int ifflags, const st
 	XLOG_INFO("adding link %s: %s", name, ether_ntoa(addr));
 	rarpd = (struct rarpd *) aux;
 	++rarpd->link_count;
-	rarpd->link = realloc(rarpd->link, rarpd->link_count * sizeof(struct link));
+	rarpd->link = realloc(rarpd->link,
+		rarpd->link_count * sizeof(struct link));
 	link = &rarpd->link[rarpd->link_count - 1];
 	link->ifindex = ifindex;
 	snprintf(link->name, sizeof(link->name), "%s", name);
@@ -108,13 +110,15 @@ void link_add_addr(int ifindex, in_addr_t addr, void *aux)
 
 		inet_ntop(AF_INET, &addr, addrstr, sizeof(addrstr));
 		if (rarpd->link[i].in_addr != 0) {
-			inet_ntop(AF_INET, &rarpd->link[i].in_addr, used, sizeof(used));
+			inet_ntop(AF_INET, &rarpd->link[i].in_addr,
+				used, sizeof(used));
 			XLOG_WARNING("ignoring address %s for link %s using %s",
 				addrstr, rarpd->link[i].name, used);
 			continue;
 		}
 
-		XLOG_INFO("using address %s for link %s", addrstr, rarpd->link[i].name);
+		XLOG_INFO("using address %s for link %s",
+			addrstr, rarpd->link[i].name);
 		rarpd->link[i].in_addr = addr;
 	}
 }
@@ -229,7 +233,8 @@ int open_socket()
 	}
 
 	if (fcntl(fd, F_SETFL, O_NONBLOCK) != 0) {
-		XLOG_ERR("error setting socket nonblocking %s", strerror(errno));
+		XLOG_ERR("error setting socket nonblocking %s",
+			strerror(errno));
 		close(fd);
 		return -1;
 	}
@@ -296,7 +301,9 @@ void dump_packet(char *buf, size_t size)
 bool check_frame(struct sockaddr_ll *addr, struct link *link)
 {
 	if (ntohs(addr->sll_protocol) != ETH_P_RARP) {
-		XLOG_INFO("frame check failed: no RARP packet: sll_protocol=0x%x", ntohs(addr->sll_protocol));
+		XLOG_INFO(
+			"frame check failed: no RARP packet: sll_protocol=0x%x",
+			ntohs(addr->sll_protocol));
 		return false;
 	}
 
@@ -355,7 +362,8 @@ bool check_request(const struct ether_arp *req, struct sockaddr_ll *addr)
 		return false;
 	}
 
-	XLOG_INFO("rarp request for %s from %s", ether_ntoa((struct ether_addr*)&req->arp_sha),
+	XLOG_INFO("rarp request for %s from %s",
+		ether_ntoa((struct ether_addr*)&req->arp_sha),
 		ether_ntoa((struct ether_addr*)&req->arp_tha));
 
 	return true;
@@ -394,12 +402,10 @@ int resolve(struct ether_addr *addr, struct in_addr *in_addr)
 
 	memset(hostname, 0, sizeof(hostname));
 	/*
-	   This is not really safe, at the time of
-	   writing glibc uses a 1024 byte buffer
-	   for the answer internally ...
-	   We could parse /etc/ethers by ourselves
-	   but then we would loose nsswitch support.
-	   Alas RARP support without NIS is no fun :-(
+	   This is not really safe, at the time of writing glibc uses
+	   a 1024 byte buffer for the answer internally ...  We could
+	   parse /etc/ethers by ourselves but then we would loose
+	   nsswitch support. Alas RARP support without NIS is no fun :-(
 	*/
 	ret = ether_ntohost(hostname, addr);
 	if (ret != 0) {
