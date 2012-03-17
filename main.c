@@ -294,8 +294,8 @@ void dump_packet(char *buf, size_t size)
 
 bool check_frame(struct sockaddr_ll *addr, struct link *link)
 {
-	if (addr->sll_protocol != ETH_P_RARP) {
-		XLOG_INFO("frame check failed: no RARP packet");
+	if (ntohs(addr->sll_protocol) != ETH_P_RARP) {
+		XLOG_INFO("frame check failed: no RARP packet: sll_protocol=0x%x", ntohs(addr->sll_protocol));
 		return false;
 	}
 
@@ -332,12 +332,12 @@ bool check_request(char *buf, ssize_t size)
 	}
 
 	req = (struct ether_arp *) buf;
-	if (req->ea_hdr.ar_hrd != ARPHRD_ETHER) {
+	if (ntohs(req->ea_hdr.ar_hrd) != ARPHRD_ETHER) {
 		XLOG_INFO("check request: invalid hardware address");
 		return false;
 	}
 
-	if (req->ea_hdr.ar_pro != ETHERTYPE_IP) {
+	if (ntohs(req->ea_hdr.ar_pro) != ETHERTYPE_IP) {
 		XLOG_INFO("check request: invalid ethertype");
 		return false;
 	}
@@ -352,7 +352,7 @@ bool check_request(char *buf, ssize_t size)
 		return false;
 	}
 
-	if (req->ea_hdr.ar_op != ARPOP_RREQUEST) {
+	if (ntohs(req->ea_hdr.ar_op) != ARPOP_RREQUEST) {
 		XLOG_INFO("check request: invalid rarp opcode");
 		return false;
 	}
