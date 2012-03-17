@@ -322,16 +322,8 @@ bool check_frame(struct sockaddr_ll *addr, struct link *link)
 	return true;
 }
 
-bool check_request(char *buf, ssize_t size)
+bool check_request(const struct ether_arp *req, struct sockaddr_ll *addr)
 {
-	struct ether_arp *req;
-
-	if ((size_t) size < sizeof(struct ether_arp)) {
-		XLOG_INFO("check request: request to short");
-		return false;
-	}
-
-	req = (struct ether_arp *) buf;
 	if (ntohs(req->ea_hdr.ar_hrd) != ARPHRD_ETHER) {
 		XLOG_INFO("check request: invalid hardware address");
 		return false;
@@ -357,34 +349,61 @@ bool check_request(char *buf, ssize_t size)
 		return false;
 	}
 
+	if (memcmp(req->arp_sha, addr->sll_addr, ETH_ALEN) != 0) {
+		XLOG_INFO("check request: spoofed src addr");
+		return false;
+	}
+
+	XLOG_INFO("rarp request for %s from %s", ether_ntoa((struct ether_addr*)&req->arp_sha),
+		ether_ntoa((struct ether_addr*)&req->arp_tha));
+
 	return true;
 }
 
-void read_request(struct link* link)
+ssize_t read_request(int fd, struct sockaddr_ll *addr, char *buf, size_t size)
 {
 	ssize_t ret;
-	char buf[1500];
-	struct sockaddr_ll addr;
 	socklen_t addrlen;
+	addrlen = sizeof(struct sockaddr_ll);
 
-	memset(buf, 0, sizeof(buf));
-	memset(&addr, 0, sizeof(addr));
-	addrlen = sizeof(addr);
-
-	ret = recvfrom(link->fd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
+	ret = recvfrom(fd, buf, size, 0, (struct sockaddr *)addr, &addrlen);
 	if (ret < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			return;
+			return 0;
 		}
-		XLOG_ERR("read error on %s: %s", link->name, strerror(errno));
+		XLOG_ERR("read error on fd %i: %s", fd, strerror(errno));
+		return -1;
 	}
 
 	XLOG_DEBUG("read %i octets", ret);
+	return ret;
+}
+
+
+void handle_request(struct link *link)
+{
+	ssize_t size;
+	char buf[1500];
+	struct sockaddr_ll addr;
+
+	memset(buf, 0, sizeof(buf));
+	memset(&addr, 0, sizeof(addr));
+
+	size = read_request(link->fd, &addr, buf, sizeof(buf));
+	if (size <= 0) {
+		return;
+	}
+
 	if (!check_frame(&addr, link)) {
 		return;
 	}
 
-	if (!check_request(buf, ret)) {
+	if ((size_t) size < sizeof(struct ether_arp)) {
+		XLOG_INFO("request to short");
+		return;
+	}
+
+	if (!check_request((struct ether_arp *)buf, &addr)) {
 		return;
 	}
 }
@@ -408,7 +427,7 @@ void dispatch_requests(struct rarpd *rarpd, int events)
 		}
 
 		XLOG_ERR("received poll event for %s", link->name);
-		read_request(link);
+		handle_request(link);
 		rarpd->fds[i].revents = 0;
 
 		if (++processed == events) {
