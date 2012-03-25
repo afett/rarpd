@@ -432,6 +432,15 @@ int resolve(struct ether_addr *addr, struct in_addr *in_addr)
 	return 0;
 }
 
+void create_reply(struct ether_arp *reply, struct in_addr *ip, struct link *link)
+{
+	reply->ea_hdr.ar_op = htons(ARPOP_RREPLY);
+	memcpy(&reply->arp_tha, &reply->arp_sha, sizeof(reply->arp_tha));
+	memcpy(&reply->arp_tpa, ip, sizeof(reply->arp_tpa));
+	memcpy(&reply->arp_sha, &link->ether_addr, sizeof(reply->arp_sha));
+	memcpy(&reply->arp_spa, &link->in_addr, sizeof(reply->arp_spa));
+}
+
 void handle_request(struct link *link)
 {
 	int ret;
@@ -470,6 +479,7 @@ void handle_request(struct link *link)
 	}
 
 	XLOG_INFO("found address: %s", inet_ntoa(ip));
+	create_reply(arp_req, &ip, link);
 }
 
 void dispatch_requests(struct rarpd *rarpd, int events)
