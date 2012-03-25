@@ -56,6 +56,8 @@ struct link {
 	in_addr_t in_addr;
 	struct ether_addr ether_addr;
 	int fd;
+	struct sockaddr_ll src;
+	char buf[1500];
 };
 
 struct rarpd {
@@ -445,20 +447,18 @@ void handle_request(struct link *link)
 {
 	int ret;
 	ssize_t size;
-	char buf[1500];
-	struct sockaddr_ll addr;
 	struct ether_arp *arp_req;
 	struct in_addr ip;
 
-	memset(buf, 0, sizeof(buf));
-	memset(&addr, 0, sizeof(addr));
+	memset(link->buf, 0, sizeof(link->buf));
+	memset(&link->src, 0, sizeof(link->src));
 
-	size = read_request(link->fd, &addr, buf, sizeof(buf));
+	size = read_request(link->fd, &link->src, link->buf, sizeof(link->buf));
 	if (size <= 0) {
 		return;
 	}
 
-	if (!check_frame(&addr, link)) {
+	if (!check_frame(&link->src, link)) {
 		return;
 	}
 
@@ -467,8 +467,8 @@ void handle_request(struct link *link)
 		return;
 	}
 
-	arp_req = (struct ether_arp *)buf;
-	if (!check_request(arp_req, &addr)) {
+	arp_req = (struct ether_arp *)link->buf;
+	if (!check_request(arp_req, &link->src)) {
 		return;
 	}
 
