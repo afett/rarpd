@@ -55,7 +55,7 @@ struct link {
 	char name[IF_NAMESIZE + 1];
 	in_addr_t in_addr;
 	struct ether_addr ether_addr;
-	int fd;
+	struct pollfd* pollfd;
 	struct sockaddr_ll src;
 	char buf[1500];
 };
@@ -216,12 +216,16 @@ int do_bind(int fd, size_t ifindex)
 	return 0;
 }
 
-void rarpd_add_pollfd(struct rarpd *rarpd, int fd)
+struct pollfd *rarpd_add_pollfd(struct rarpd *rarpd, int fd)
 {
-	rarpd->fds[rarpd->nfds].fd = fd;
-	rarpd->fds[rarpd->nfds].events = POLLIN;
-	rarpd->fds[rarpd->nfds].revents = 0;
+	struct pollfd* pollfd;
+
+	pollfd = &rarpd->fds[rarpd->nfds];
+	pollfd->fd = fd;
+	pollfd->events = POLLIN;
+	pollfd->revents = 0;
 	++rarpd->nfds;
+	return pollfd;
 }
 
 int open_socket()
@@ -265,8 +269,7 @@ int setup_links(struct rarpd *rarpd)
 			goto err;
 		}
 
-		rarpd->link[i].fd = fd;
-		rarpd_add_pollfd(rarpd, fd);
+		rarpd->link[i].pollfd = rarpd_add_pollfd(rarpd, fd);
 	}
 
 	return 0;
@@ -279,9 +282,9 @@ err:
 struct link* find_link_by_fd(int fd, struct link* link, size_t size)
 {
 	size_t i;
-	for (i = 0; i < size; ++i) {
-		if (link[i].fd == fd) {
-			return &link[i];
+	for (i = 0; i < size; ++i, ++link) {
+		if (link->pollfd->fd == fd) {
+			return link;
 		}
 	}
 
@@ -453,7 +456,7 @@ void handle_request(struct link *link)
 	memset(link->buf, 0, sizeof(link->buf));
 	memset(&link->src, 0, sizeof(link->src));
 
-	size = read_request(link->fd, &link->src, link->buf, sizeof(link->buf));
+	size = read_request(link->pollfd->fd, &link->src, link->buf, sizeof(link->buf));
 	if (size <= 0) {
 		return;
 	}
