@@ -456,6 +456,12 @@ void create_reply(struct ether_arp *reply, struct in_addr *ip, struct link *link
 	memcpy(&reply->arp_spa, &link->in_addr, sizeof(reply->arp_spa));
 }
 
+/* look for a "bootable" file which we can serve via tftp
+ * The file must start with the hex encoded ip address
+ * and be placed in /tftpboot.
+ * An ss4 that is assigned an address of 192.168.77.17
+ * for example will try to boot a file named C0A84D11.SUN4M
+ */
 bool is_bootable(struct in_addr in)
 {
 	DIR *dir;
@@ -465,6 +471,7 @@ bool is_bootable(struct in_addr in)
 
 	snprintf(name, sizeof(name), "%08X", ntohl(*(uint32_t*)(&in)));
 	XLOG_DEBUG("looking for file matching %s in %s", name, bootdir);
+
 	dir = opendir(bootdir);
 	if (dir == NULL) {
 		return false;
