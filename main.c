@@ -456,7 +456,9 @@ void handle_request(struct link *link)
 	memset(link->buf, 0, sizeof(link->buf));
 	memset(&link->src, 0, sizeof(link->src));
 
-	size = read_request(link->pollfd->fd, &link->src, link->buf, sizeof(link->buf));
+	size = read_request(link->pollfd->fd,
+		&link->src, link->buf, sizeof(link->buf));
+
 	if (size <= 0) {
 		return;
 	}
@@ -483,6 +485,28 @@ void handle_request(struct link *link)
 
 	XLOG_INFO("found address: %s", inet_ntoa(ip));
 	create_reply(arp_req, &ip, link);
+	link->pollfd->events = POLLOUT;
+}
+
+int send_reply(struct link *link)
+{
+	ssize_t ret;
+
+	ret = sendto(link->pollfd->fd, link->buf, sizeof(struct ether_arp), 0,
+		(struct sockaddr *)&link->src, sizeof(struct sockaddr_ll));
+
+	if (ret < 0) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			return 0;
+		}
+		XLOG_ERR("write error on fd %i: %s",
+			link->pollfd->fd, strerror(errno));
+		return -1;
+	}
+
+	XLOG_DEBUG("send %i octets on %s", ret, link->name);
+	link->pollfd->events = POLLIN;
+	return 0;
 }
 
 void dispatch_requests(struct rarpd *rarpd, int events)
@@ -490,22 +514,32 @@ void dispatch_requests(struct rarpd *rarpd, int events)
 	nfds_t i;
 	int processed;
 	struct link *link;
+	struct pollfd *pollfd;
 
 	processed = 0;
-	for (i = 0; i < rarpd->nfds; ++i) {
-		if (rarpd->fds[i].revents == 0) {
+	pollfd = rarpd->fds;
+	for (i = 0; i < rarpd->nfds; ++i, ++pollfd) {
+		if (pollfd->revents == 0) {
 			continue;
 		}
 
-		link = find_link_by_fd(rarpd->fds[i].fd, rarpd->link, rarpd->link_count);
+		link = find_link_by_fd(pollfd->fd, rarpd->link, rarpd->link_count);
 		if (link == NULL) {
 			XLOG_ERR("received poll event for unkown link");
 			return;
 		}
 
-		XLOG_ERR("received poll event for %s", link->name);
-		handle_request(link);
-		rarpd->fds[i].revents = 0;
+		XLOG_DEBUG("received poll event for %s", link->name);
+
+		if (pollfd->revents & POLLIN) {
+			handle_request(link);
+		} else if (pollfd->revents & POLLOUT) {
+			send_reply(link);
+		} else {
+			XLOG_DEBUG("poll error on %s", link->name);
+		}
+
+		pollfd->revents = 0;
 
 		if (++processed == events) {
 			return;
@@ -513,7 +547,7 @@ void dispatch_requests(struct rarpd *rarpd, int events)
 	}
 }
 
-void handle_requests(struct rarpd *rarpd)
+void poll_loop(struct rarpd *rarpd)
 {
 	int events;
 
@@ -571,7 +605,7 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	handle_requests(&rarpd);
+	poll_loop(&rarpd);
 
 	free(rarpd.fds);
 	free(rarpd.link);
