@@ -1,7 +1,5 @@
 * arp cache management via netlink (beware of tainted data)
 
-* supply an answer 
-
 * identify possibly blocking io and use nonblocking socket io
 
 * check netlink error handling

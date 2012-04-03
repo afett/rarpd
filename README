@@ -3,3 +3,6 @@ reverse arp daemon for linux
 see rfc903
 
 This is work in progress.
+
+Tested on Debian squeeze Kernel 2.6.32 against
+a Sun Sparcstation 4 and a Sun Ultra 60.
