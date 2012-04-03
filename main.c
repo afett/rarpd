@@ -50,6 +50,7 @@
 
 #include "xlog.h"
 #include "netlink.h"
+#include "sighandler.h"
 
 struct link {
 	int ifindex;
@@ -611,6 +612,22 @@ void rarpd_init(struct rarpd *rarpd)
 	rarpd->nl_ctx.fd = -1;
 }
 
+int write_pidfile()
+{
+	FILE *pidfile;
+
+	pidfile = fopen("/var/run/rarpd.pid", "w");
+	if (pidfile == NULL) {
+		XLOG_ERR("could not open pidfile: %s", strerror(errno));
+		return -1;
+	}
+
+	fprintf(pidfile, "%u", getpid());
+	fclose(pidfile);
+
+	return 0;
+}
+
 int parse_options(struct rarpd* rarpd, int argc, char *argv[])
 {
 	int opt;
@@ -682,6 +699,8 @@ int main(int argc, char *argv[])
 
 	free(rarpd.fds);
 	free(rarpd.link);
+
+	unlink("/var/run/rarpd.pid");
 
 	return 0;
 }
