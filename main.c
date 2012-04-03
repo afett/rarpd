@@ -25,6 +25,7 @@
  */
 
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -60,12 +61,21 @@ struct link {
 	char buf[1500];
 };
 
+enum {
+	LISTEN_ALL = 1 << 0,
+	DEBUG_MODE = 1 << 1,
+	FOREGROUND = 1 << 2,
+	LOG_REQ    = 1 << 3,
+	BOOT_FILE  = 1 << 4,
+};
+
 struct rarpd {
 	struct nl_ctx nl_ctx;
 	size_t link_count;
 	struct link *link;
 	nfds_t nfds;
 	struct pollfd *fds;
+	unsigned int opts;
 };
 
 void add_link(int ifindex, unsigned short iftype, unsigned int ifflags,
@@ -446,7 +456,29 @@ void create_reply(struct ether_arp *reply, struct in_addr *ip, struct link *link
 	memcpy(&reply->arp_spa, &link->in_addr, sizeof(reply->arp_spa));
 }
 
-void handle_request(struct link *link)
+bool is_bootable(struct in_addr in)
+{
+	DIR *dir;
+	struct dirent *entry;
+	char name[9];
+	const char bootdir[] = "/tftpboot";
+
+	snprintf(name, sizeof(name), "%08X", ntohl(*(uint32_t*)(&in)));
+	XLOG_DEBUG("looking for file matching %s in %s", name, bootdir);
+	dir = opendir(bootdir);
+	if (dir == NULL) {
+		return false;
+	}
+
+	do {
+		entry = readdir(dir);
+	} while (entry != NULL && strncmp(name, entry->d_name, 8) != 0);
+
+	closedir(dir);
+	return entry != NULL;
+}
+
+void handle_request(struct link *link, bool check_bootable)
 {
 	int ret;
 	ssize_t size;
@@ -484,6 +516,10 @@ void handle_request(struct link *link)
 	}
 
 	XLOG_INFO("found address: %s", inet_ntoa(ip));
+	if (check_bootable == true && !is_bootable(ip)) {
+		return;
+	}
+
 	create_reply(arp_req, &ip, link);
 	link->pollfd->events = POLLOUT;
 }
@@ -532,7 +568,7 @@ void dispatch_requests(struct rarpd *rarpd, int events)
 		XLOG_DEBUG("received poll event for %s", link->name);
 
 		if (pollfd->revents & POLLIN) {
-			handle_request(link);
+			handle_request(link, rarpd->opts & BOOT_FILE);
 		} else if (pollfd->revents & POLLOUT) {
 			send_reply(link);
 		} else {
@@ -564,11 +600,38 @@ void poll_loop(struct rarpd *rarpd)
 
 void rarpd_init(struct rarpd *rarpd)
 {
-	rarpd->link_count = 0;
-	rarpd->link = NULL;
-	rarpd->nfds = 0;
-	rarpd->fds = NULL;
+	memset(rarpd, 0, sizeof(struct rarpd));
 	rarpd->nl_ctx.fd = -1;
+}
+
+int parse_options(struct rarpd* rarpd, int argc, char *argv[])
+{
+	int opt;
+
+	for (;;) {
+		opt = getopt(argc, argv, "adflt");
+		switch (opt) {
+		case -1:
+			return 0;
+		case 'a':
+			rarpd->opts |= LISTEN_ALL;
+			break;
+		case 'd':
+			rarpd->opts |= DEBUG_MODE;
+			break;
+		case 'f':
+			rarpd->opts |= FOREGROUND;
+			break;
+		case 'l':
+			rarpd->opts |= LOG_REQ;
+			break;
+		case 't':
+			rarpd->opts |= BOOT_FILE;
+			break;
+		default:
+			return -1;
+		}
+	}
 }
 
 int main(int argc, char *argv[])
@@ -579,6 +642,9 @@ int main(int argc, char *argv[])
 	struct rarpd rarpd;
 
 	rarpd_init(&rarpd);
+	if (parse_options(&rarpd, argc, argv) != 0) {
+		return EXIT_FAILURE;
+	}
 
 	openlog("rarpd", LOG_PERROR|LOG_PID, LOG_DAEMON);
 	if (nl_open(&rarpd.nl_ctx) != 0) {
