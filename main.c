@@ -528,6 +528,15 @@ void handle_requests(struct rarpd *rarpd)
 	}
 }
 
+void rarpd_init(struct rarpd *rarpd)
+{
+	rarpd->link_count = 0;
+	rarpd->link = NULL;
+	rarpd->nfds = 0;
+	rarpd->fds = NULL;
+	rarpd->nl_ctx.fd = -1;
+}
+
 int main(int argc, char *argv[])
 {
 	(void) argc;
@@ -535,11 +544,7 @@ int main(int argc, char *argv[])
 
 	struct rarpd rarpd;
 
-	rarpd.link_count = 0;
-	rarpd.link = NULL;
-	rarpd.nfds = 0;
-	rarpd.fds = NULL;
-	rarpd.nl_ctx.fd = -1;
+	rarpd_init(&rarpd);
 
 	openlog("rarpd", LOG_PERROR|LOG_PID, LOG_DAEMON);
 	if (nl_open(&rarpd.nl_ctx) != 0) {
