@@ -52,6 +52,8 @@
 #include "netlink.h"
 #include "sighandler.h"
 
+#define PIDFILE "/var/run/rarpd.pid"
+
 struct link {
 	int ifindex;
 	char name[IF_NAMESIZE + 1];
@@ -630,11 +632,18 @@ void rarpd_init(struct rarpd *rarpd)
 
 int write_pidfile()
 {
+	int fd;
 	FILE *pidfile;
 
-	pidfile = fopen("/var/run/rarpd.pid", "w");
-	if (pidfile == NULL) {
+	fd = open(PIDFILE, O_WRONLY|O_CLOEXEC|O_CREAT|O_EXCL, 0644);
+	if (fd < 0) {
 		XLOG_ERR("could not open pidfile: %s", strerror(errno));
+		return -1;
+	}
+
+	pidfile = fdopen(fd, "w");
+	if (pidfile == NULL) {
+		XLOG_ERR("could not fdopen pidfile: %s", strerror(errno));
 		return -1;
 	}
 
@@ -726,6 +735,10 @@ int daemonize()
 		exit(EXIT_SUCCESS);
 	}
 
+	if (write_pidfile() != 0) {
+		return -1;
+	}
+
 	ret = setsid();
 	if (ret == -1) {
 		XLOG_ERR("failed to set session id: %s", strerror(errno));
@@ -743,6 +756,13 @@ int daemonize()
 	dup(fd);
 
 	return 0;
+}
+
+void cleanup_rarpd(struct rarpd *rarpd)
+{
+	unlink(PIDFILE);
+	free(rarpd->fds);
+	free(rarpd->link);
 }
 
 int main(int argc, char *argv[])
@@ -773,21 +793,19 @@ int main(int argc, char *argv[])
 	}
 
 	if (setup_links(&rarpd) != 0) {
+		cleanup_rarpd(&rarpd);
 		return EXIT_FAILURE;
 	}
 
 	if (!(rarpd.opts & FOREGROUND)) {
 		if (daemonize() != 0) {
+			cleanup_rarpd(&rarpd);
 			return EXIT_FAILURE;
 		}
 	}
 
 	poll_loop(&rarpd);
 
-	free(rarpd.fds);
-	free(rarpd.link);
-
-	unlink("/var/run/rarpd.pid");
-
+	cleanup_rarpd(&rarpd);
 	return 0;
 }
