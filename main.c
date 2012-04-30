@@ -657,7 +657,7 @@ int parse_options(struct rarpd* rarpd, int argc, char *argv[])
 			rarpd->opts |= LISTEN_ALL;
 			break;
 		case 'd':
-			rarpd->opts |= DEBUG_MODE;
+			rarpd->opts |= (DEBUG_MODE|FOREGROUND);
 			break;
 		case 'f':
 			rarpd->opts |= FOREGROUND;
@@ -711,6 +711,40 @@ int find_interfaces(struct rarpd *rarpd)
 	return 0;
 }
 
+int daemonize()
+{
+	int ret;
+	int fd;
+	pid_t pid;
+
+	pid = fork();
+	if (pid < 0) {
+		exit(EXIT_FAILURE);
+	}
+
+	if (pid > 0) {
+		exit(EXIT_SUCCESS);
+	}
+
+	ret = setsid();
+	if (ret == -1) {
+		XLOG_ERR("failed to set session id: %s", strerror(errno));
+		return -1;
+	}
+
+	for (fd = getdtablesize(); fd >= 0; --fd) {
+		 close(fd);
+	}
+
+	chdir("/");
+
+	fd = open("/dev/null", O_RDWR);
+	dup(fd);
+	dup(fd);
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	(void) argc;
@@ -740,6 +774,12 @@ int main(int argc, char *argv[])
 
 	if (setup_links(&rarpd) != 0) {
 		return EXIT_FAILURE;
+	}
+
+	if (!(rarpd.opts & FOREGROUND)) {
+		if (daemonize() != 0) {
+			return EXIT_FAILURE;
+		}
 	}
 
 	poll_loop(&rarpd);
