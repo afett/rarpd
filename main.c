@@ -77,13 +77,30 @@ struct rarpd {
 	nfds_t nfds;
 	struct pollfd *fds;
 	unsigned int opts;
+	char **ifname;
 };
+
+bool in_argv(const char *name, char **ifname)
+{
+	for (; *ifname != NULL; ++ifname) {
+		if (strcmp(name, *ifname) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
 
 void add_link(int ifindex, unsigned short iftype, unsigned int ifflags,
 	const struct ether_addr *addr, const char *name, void *aux)
 {
 	struct rarpd *rarpd;
 	struct link *link;
+
+	rarpd = (struct rarpd *) aux;
+	if (!(rarpd->opts & LISTEN_ALL) && !in_argv(name, rarpd->ifname)) {
+		XLOG_INFO("skipping %s: not found in arguments", name);
+		return;
+	}
 
 	if (iftype != ARPHRD_ETHER) {
 		XLOG_INFO("skipping %s: no ethernet", name);
@@ -96,7 +113,6 @@ void add_link(int ifindex, unsigned short iftype, unsigned int ifflags,
 	}
 
 	XLOG_INFO("adding link %s: %s", name, ether_ntoa(addr));
-	rarpd = (struct rarpd *) aux;
 	++rarpd->link_count;
 	rarpd->link = realloc(rarpd->link,
 		rarpd->link_count * sizeof(struct link));
@@ -658,6 +674,43 @@ int parse_options(struct rarpd* rarpd, int argc, char *argv[])
 	}
 }
 
+int parse_args(struct rarpd* rarpd, char *argv[])
+{
+	if (rarpd->opts & LISTEN_ALL) {
+		if (argv[optind] != NULL) {
+			XLOG_ERR("found extra arguments, but -a given");
+			return -1;
+		}
+		return 0;
+	}
+
+	if (argv[optind] == NULL) {
+		XLOG_ERR("no interfaces specified, use -a for all interfaces");
+		return -1;
+	}
+
+	rarpd->ifname = &argv[optind];
+	return 0;
+}
+
+int find_interfaces(struct rarpd *rarpd)
+{
+	if (nl_open(&rarpd->nl_ctx) != 0) {
+		return -1;
+	}
+
+	if (get_links(rarpd) != 0) {
+		return -1;
+	}
+
+	if (get_addresses(rarpd) != 0) {
+		return -1;
+	}
+
+	nl_close(&rarpd->nl_ctx);
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	(void) argc;
@@ -670,20 +723,14 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
+	if (parse_args(&rarpd, argv) != 0) {
+		return EXIT_FAILURE;
+	}
+
 	openlog("rarpd", LOG_PERROR|LOG_PID, LOG_DAEMON);
-	if (nl_open(&rarpd.nl_ctx) != 0) {
+	if (find_interfaces(&rarpd) != 0) {
 		return EXIT_FAILURE;
 	}
-
-	if (get_links(&rarpd) != 0) {
-		return EXIT_FAILURE;
-	}
-
-	if (get_addresses(&rarpd) != 0) {
-		return EXIT_FAILURE;
-	}
-
-	nl_close(&rarpd.nl_ctx);
 
 	filter_links(&rarpd);
 	if (rarpd.link_count == 0) {
