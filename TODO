@@ -7,12 +7,8 @@
 * commandline options, at least rarpd [-adflt] if0 [... ifN] (see OpenBSD rarpd(8))
   should be supported.
 
-* daemonize and write pidfile
-
 * some kind of priviledge seperation ie. fork for arp cache management, pass the open
   fds to an unprivileged process.
 
 * use capabilities (7) CAP_NET_RAW for socket handling and CAP_NET_ADMIN for arp cache,
   drop all others
-
-* signal handling (is this necessary ?)
