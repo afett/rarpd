@@ -100,21 +100,21 @@ void add_link(int ifindex, unsigned short iftype, unsigned int ifflags,
 
 	rarpd = (struct rarpd *) aux;
 	if (!(rarpd->opts & LISTEN_ALL) && !in_argv(name, rarpd->ifname)) {
-		XLOG_INFO("skipping %s: not found in arguments", name);
+		XLOG_DEBUG("skipping %s: not found in arguments", name);
 		return;
 	}
 
 	if (iftype != ARPHRD_ETHER) {
-		XLOG_INFO("skipping %s: no ethernet", name);
+		XLOG_DEBUG("skipping %s: no ethernet", name);
 		return;
 	}
 
 	if (!(ifflags & IFF_RUNNING)) {
-		XLOG_INFO("skipping %s: link is down", name);
+		XLOG_DEBUG("skipping %s: link is down", name);
 		return;
 	}
 
-	XLOG_INFO("adding link %s: %s", name, ether_ntoa(addr));
+	XLOG_DEBUG("adding link %s: %s", name, ether_ntoa(addr));
 	++rarpd->link_count;
 	rarpd->link = realloc(rarpd->link,
 		rarpd->link_count * sizeof(struct link));
@@ -148,7 +148,7 @@ void link_add_addr(int ifindex, in_addr_t addr, void *aux)
 			continue;
 		}
 
-		XLOG_INFO("using address %s for link %s",
+		XLOG_DEBUG("using address %s for link %s",
 			addrstr, rarpd->link[i].name);
 		rarpd->link[i].in_addr = addr;
 	}
@@ -316,29 +316,29 @@ void dump_packet(char *buf, size_t size)
 bool check_frame(struct sockaddr_ll *addr, struct link *link)
 {
 	if (ntohs(addr->sll_protocol) != ETH_P_RARP) {
-		XLOG_INFO(
+		XLOG_WARNING(
 			"frame check failed: no RARP packet: sll_protocol=0x%x",
 			ntohs(addr->sll_protocol));
 		return false;
 	}
 
 	if (addr->sll_ifindex != link->ifindex) {
-		XLOG_INFO("frame check failed: wrong interface");
+		XLOG_WARNING("frame check failed: wrong interface");
 		return false;
 	}
 
 	if (addr->sll_hatype != ARPHRD_ETHER) {
-		XLOG_INFO("frame check failed: no ethernet");
+		XLOG_WARNING("frame check failed: no ethernet");
 		return false;
 	}
 
 	if (addr->sll_pkttype != PACKET_BROADCAST) {
-		XLOG_INFO("frame check failed: no broadcast");
+		XLOG_WARNING("frame check failed: no broadcast");
 		return false;
 	}
 
 	if (addr->sll_halen != sizeof(struct ether_addr)) {
-		XLOG_INFO("frame check failed: bad source address length");
+		XLOG_WARNING("frame check failed: bad source address length");
 		return false;
 	}
 
@@ -348,36 +348,36 @@ bool check_frame(struct sockaddr_ll *addr, struct link *link)
 bool check_request(const struct ether_arp *req, struct sockaddr_ll *addr)
 {
 	if (ntohs(req->ea_hdr.ar_hrd) != ARPHRD_ETHER) {
-		XLOG_INFO("check request: invalid hardware address");
+		XLOG_WARNING("check request: invalid hardware address");
 		return false;
 	}
 
 	if (ntohs(req->ea_hdr.ar_pro) != ETHERTYPE_IP) {
-		XLOG_INFO("check request: invalid ethertype");
+		XLOG_WARNING("check request: invalid ethertype");
 		return false;
 	}
 
 	if (req->ea_hdr.ar_hln != ETH_ALEN) {
-		XLOG_INFO("check request: invalid hardware address length");
+		XLOG_WARNING("check request: invalid hardware address length");
 		return false;
 	}
 
 	if (req->ea_hdr.ar_pln != sizeof(in_addr_t)) {
-		XLOG_INFO("check request: invalid protocol address length");
+		XLOG_WARNING("check request: invalid protocol address length");
 		return false;
 	}
 
 	if (ntohs(req->ea_hdr.ar_op) != ARPOP_RREQUEST) {
-		XLOG_INFO("check request: invalid rarp opcode");
+		XLOG_WARNING("check request: invalid rarp opcode");
 		return false;
 	}
 
 	if (memcmp(req->arp_sha, addr->sll_addr, ETH_ALEN) != 0) {
-		XLOG_INFO("check request: spoofed src addr");
+		XLOG_WARNING("check request: spoofed src addr");
 		return false;
 	}
 
-	XLOG_INFO("rarp request for %s from %s",
+	XLOG_DEBUG("rarp request for %s from %s",
 		ether_ntoa((struct ether_addr*)&req->arp_sha),
 		ether_ntoa((struct ether_addr*)&req->arp_tha));
 
@@ -424,7 +424,7 @@ int resolve(struct ether_addr *addr, struct in_addr *in_addr)
 	*/
 	ret = ether_ntohost(hostname, addr);
 	if (ret != 0) {
-		XLOG_INFO("failed to lookup %s", ether_ntoa(addr));
+		XLOG_DEBUG("failed to lookup %s", ether_ntoa(addr));
 		return -1;
 	}
 
@@ -436,7 +436,7 @@ int resolve(struct ether_addr *addr, struct in_addr *in_addr)
 	ai = NULL;
 	ret = getaddrinfo(hostname, NULL, &hints, &ai);
 	if (ret != 0) {
-		XLOG_INFO("could not resolve '%s': %s\n", hostname,
+		XLOG_DEBUG("could not resolve '%s': %s\n", hostname,
 			ret == EAI_SYSTEM ? strerror(errno) : gai_strerror(ret));
 		return -1;
 	}
@@ -507,7 +507,7 @@ void handle_request(int fd, struct link *link, bool check_bootable)
 	}
 
 	if ((size_t) size < sizeof(struct ether_arp)) {
-		XLOG_INFO("request to short");
+		XLOG_WARNING("request to short");
 		return;
 	}
 
@@ -522,7 +522,7 @@ void handle_request(int fd, struct link *link, bool check_bootable)
 		return;
 	}
 
-	XLOG_INFO("found address: %s", inet_ntoa(ip));
+	XLOG_DEBUG("found address: %s", inet_ntoa(ip));
 	if (check_bootable == true && !is_bootable(ip)) {
 		return;
 	}
@@ -732,6 +732,7 @@ int daemonize()
 	ret = setsid();
 	if (ret == -1) {
 		XLOG_ERR("failed to set session id: %s", strerror(errno));
+		unlink(PIDFILE);
 		return -1;
 	}
 
@@ -755,12 +756,26 @@ void cleanup_rarpd(struct rarpd *rarpd)
 	dispatcher_cleanup(&rarpd->dispatcher);
 }
 
+void init_syslog(struct rarpd *rarpd)
+{
+	int logopt;
+
+	logopt = LOG_PID;
+	if (rarpd->opts & DEBUG_MODE) {
+		logopt |= LOG_PERROR;
+	}
+	openlog("rarpd", logopt, LOG_DAEMON);
+
+	if (!(rarpd->opts & DEBUG_MODE)) {
+		setlogmask(LOG_UPTO(LOG_INFO));
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	(void) argc;
 	(void) argv;
 
-	int logopt;
 	struct rarpd rarpd;
 
 	rarpd_init(&rarpd);
@@ -773,16 +788,11 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	logopt = LOG_PID;
-	if (rarpd.opts & FOREGROUND) {
-		logopt |= LOG_PERROR;
-	} else {
-		if (daemonize() != 0) {
-			cleanup_rarpd(&rarpd);
-			return EXIT_FAILURE;
-		}
+	if (!(rarpd.opts & FOREGROUND) && daemonize() != 0) {
+		return EXIT_FAILURE;
 	}
-	openlog("rarpd", logopt, LOG_DAEMON);
+
+	init_syslog(&rarpd);
 
 	if (rarpd_init_signals(&rarpd) != 0) {
 		return EXIT_FAILURE;
