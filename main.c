@@ -589,14 +589,16 @@ signal_handler(int fd, short events, void *aux)
 	return DISPATCH_ABORT;
 }
 
-int rarpd_init(struct rarpd *rarpd)
+void rarpd_init(struct rarpd *rarpd)
 {
-	int signalfd;
-
 	memset(rarpd, 0, sizeof(struct rarpd));
 	rarpd->nl_ctx.fd = -1;
-
 	dispatcher_init(&rarpd->dispatcher);
+}
+
+int rarpd_init_signals(struct rarpd *rarpd)
+{
+	int signalfd;
 
 	signalfd = install_signal_fd();
 	if (signalfd < 0) {
@@ -758,11 +760,10 @@ int main(int argc, char *argv[])
 	(void) argc;
 	(void) argv;
 
+	int logopt;
 	struct rarpd rarpd;
 
-	if (rarpd_init(&rarpd) != 0) {
-		return EXIT_FAILURE;
-	}
+	rarpd_init(&rarpd);
 
 	if (parse_options(&rarpd, argc, argv) != 0) {
 		return EXIT_FAILURE;
@@ -772,7 +773,20 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	openlog("rarpd", LOG_PERROR|LOG_PID, LOG_DAEMON);
+	logopt = LOG_PID;
+	if (rarpd.opts & FOREGROUND) {
+		logopt |= LOG_PERROR;
+	} else {
+		if (daemonize() != 0) {
+			cleanup_rarpd(&rarpd);
+			return EXIT_FAILURE;
+		}
+	}
+	openlog("rarpd", logopt, LOG_DAEMON);
+
+	if (rarpd_init_signals(&rarpd) != 0) {
+		return EXIT_FAILURE;
+	}
 
 	if (find_interfaces(&rarpd) != 0) {
 		return EXIT_FAILURE;
@@ -787,13 +801,6 @@ int main(int argc, char *argv[])
 	if (setup_links(&rarpd) != 0) {
 		cleanup_rarpd(&rarpd);
 		return EXIT_FAILURE;
-	}
-
-	if (!(rarpd.opts & FOREGROUND)) {
-		if (daemonize() != 0) {
-			cleanup_rarpd(&rarpd);
-			return EXIT_FAILURE;
-		}
 	}
 
 	dispatcher_run(&rarpd.dispatcher);
