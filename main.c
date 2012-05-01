@@ -43,12 +43,12 @@
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
 #include <netpacket/packet.h>
-#include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include "xlog.h"
+#include "dispatcher.h"
 #include "netlink.h"
 #include "sighandler.h"
 
@@ -59,7 +59,7 @@ struct link {
 	char name[IF_NAMESIZE + 1];
 	in_addr_t in_addr;
 	struct ether_addr ether_addr;
-	struct pollfd* pollfd;
+	struct poll_handler *handler;
 	struct sockaddr_ll src;
 	char buf[1500];
 };
@@ -76,8 +76,8 @@ struct rarpd {
 	struct nl_ctx nl_ctx;
 	size_t link_count;
 	struct link *link;
-	nfds_t nfds;
-	struct pollfd *fds;
+	struct dispatcher dispatcher;
+	struct poll_handler *sighandler;
 	unsigned int opts;
 	char **ifname;
 };
@@ -245,18 +245,6 @@ int do_bind(int fd, size_t ifindex)
 	return 0;
 }
 
-struct pollfd *rarpd_add_pollfd(struct rarpd *rarpd, int fd)
-{
-	struct pollfd* pollfd;
-
-	pollfd = &rarpd->fds[rarpd->nfds];
-	pollfd->fd = fd;
-	pollfd->events = POLLIN;
-	pollfd->revents = 0;
-	++rarpd->nfds;
-	return pollfd;
-}
-
 int open_socket()
 {
 	int fd;
@@ -277,47 +265,40 @@ int open_socket()
 	return fd;
 }
 
+enum dispatch_action
+rarp_handler(int fd, short events, void *aux);
+
 int setup_links(struct rarpd *rarpd)
 {
 	size_t i;
 	int fd;
+	struct link *link;
 
-	rarpd->fds = malloc(rarpd->link_count * sizeof(struct pollfd));
-
-	for (i = 0; i < rarpd->link_count; ++i) {
+	link = rarpd->link;
+	for (i = 0; i < rarpd->link_count; ++i, ++link) {
 		fd = open_socket();
 		if (fd < 0) {
 			goto err;
 		}
 
-		if (do_bind(fd, rarpd->link[i].ifindex) != 0) {
+		if (do_bind(fd, link->ifindex) != 0) {
 			goto err;
 		}
 
-		if (set_promisc(fd, rarpd->link[i].ifindex) != 0) {
+		if (set_promisc(fd, link->ifindex) != 0) {
 			goto err;
 		}
 
-		rarpd->link[i].pollfd = rarpd_add_pollfd(rarpd, fd);
+		link->handler = dispatcher_watch(
+			&rarpd->dispatcher, fd, rarp_handler, link);
+		link->handler->events = POLLIN;
 	}
 
 	return 0;
 err:
 	close(fd);
-	XLOG_ERR("error setting up %s", rarpd->link[i].name);
+	XLOG_ERR("error setting up %s", link->name);
 	return -1;
-}
-
-struct link* find_link_by_fd(int fd, struct link* link, size_t size)
-{
-	size_t i;
-	for (i = 0; i < size; ++i, ++link) {
-		if (link->pollfd->fd == fd) {
-			return link;
-		}
-	}
-
-	return NULL;
 }
 
 void dump_packet(char *buf, size_t size)
@@ -504,7 +485,7 @@ bool is_bootable(struct in_addr in)
 	return entry != NULL;
 }
 
-void handle_request(struct link *link, bool check_bootable)
+void handle_request(int fd, struct link *link, bool check_bootable)
 {
 	int ret;
 	ssize_t size;
@@ -514,7 +495,7 @@ void handle_request(struct link *link, bool check_bootable)
 	memset(link->buf, 0, sizeof(link->buf));
 	memset(&link->src, 0, sizeof(link->src));
 
-	size = read_request(link->pollfd->fd,
+	size = read_request(fd,
 		&link->src, link->buf, sizeof(link->buf));
 
 	if (size <= 0) {
@@ -547,87 +528,85 @@ void handle_request(struct link *link, bool check_bootable)
 	}
 
 	create_reply(arp_req, &ip, link);
-	link->pollfd->events = POLLOUT;
+	link->handler->events = POLLOUT;
 }
 
-int send_reply(struct link *link)
+int send_reply(int fd, struct link *link)
 {
 	ssize_t ret;
 
-	ret = sendto(link->pollfd->fd, link->buf, sizeof(struct ether_arp), 0,
+	ret = sendto(fd, link->buf, sizeof(struct ether_arp), 0,
 		(struct sockaddr *)&link->src, sizeof(struct sockaddr_ll));
 
 	if (ret < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
 			return 0;
 		}
-		XLOG_ERR("write error on fd %i: %s",
-			link->pollfd->fd, strerror(errno));
+		XLOG_ERR("write error on fd %i: %s", fd, strerror(errno));
 		return -1;
 	}
 
 	XLOG_DEBUG("send %i octets on %s", ret, link->name);
-	link->pollfd->events = POLLIN;
+	link->handler->events = POLLIN;
 	return 0;
 }
 
-void dispatch_requests(struct rarpd *rarpd, int events)
+enum dispatch_action
+rarp_handler(int fd, short events, void *aux)
 {
-	nfds_t i;
-	int processed;
 	struct link *link;
-	struct pollfd *pollfd;
 
-	processed = 0;
-	pollfd = rarpd->fds;
-	for (i = 0; i < rarpd->nfds; ++i, ++pollfd) {
-		if (pollfd->revents == 0) {
-			continue;
-		}
+	link = (struct link*) aux;
+	XLOG_DEBUG("received poll event for %s", link->name);
 
-		link = find_link_by_fd(pollfd->fd, rarpd->link, rarpd->link_count);
-		if (link == NULL) {
-			XLOG_ERR("received poll event for unkown link");
-			return;
-		}
-
-		XLOG_DEBUG("received poll event for %s", link->name);
-
-		if (pollfd->revents & POLLIN) {
-			handle_request(link, rarpd->opts & BOOT_FILE);
-		} else if (pollfd->revents & POLLOUT) {
-			send_reply(link);
-		} else {
-			XLOG_DEBUG("poll error on %s", link->name);
-		}
-
-		pollfd->revents = 0;
-
-		if (++processed == events) {
-			return;
-		}
+	if (events & POLLIN) {
+		handle_request(fd, link, false);
+	} else if (events & POLLOUT) {
+		send_reply(fd, link);
+	} else {
+		XLOG_DEBUG("poll error on %s", link->name);
 	}
+
+	return DISPATCH_CONTINUE;
 }
 
-void poll_loop(struct rarpd *rarpd)
+enum dispatch_action
+signal_handler(int fd, short events, void *aux)
 {
-	int events;
+	(void) events;
+	(void) aux;
 
-	for(;;) {
-		events = poll(rarpd->fds, rarpd->nfds, -1);
-		if (events < 0) {
-			XLOG_ERR("poll error: %s", strerror(errno));
-			return;
-		}
+	int signo;
+	int ret;
 
-		dispatch_requests(rarpd, events);
-	}
+	signo = 0;
+	do {
+		ret = read(fd, &signo, sizeof(signo));
+	} while (ret < 0 && errno == EINTR);
+
+	XLOG_INFO("caught signal: %s terminating", strsignal(signo));
+
+	return DISPATCH_ABORT;
 }
 
-void rarpd_init(struct rarpd *rarpd)
+int rarpd_init(struct rarpd *rarpd)
 {
+	int signalfd;
+
 	memset(rarpd, 0, sizeof(struct rarpd));
 	rarpd->nl_ctx.fd = -1;
+
+	dispatcher_init(&rarpd->dispatcher);
+
+	signalfd = install_signal_fd();
+	if (signalfd < 0) {
+		return -1;
+	}
+
+	rarpd->sighandler = dispatcher_watch(
+		&rarpd->dispatcher, signalfd, signal_handler, NULL);
+	rarpd->sighandler->events = POLLIN;
+	return 0;
 }
 
 int write_pidfile()
@@ -651,6 +630,14 @@ int write_pidfile()
 	fclose(pidfile);
 
 	return 0;
+}
+
+void usage(const char* msg)
+{
+	if (msg != NULL) {
+		fprintf(stderr, "%s\n", msg);
+	}
+	fprintf(stderr, "Usage: rarpd [-adflt] interface ...\n");
 }
 
 int parse_options(struct rarpd* rarpd, int argc, char *argv[])
@@ -678,6 +665,7 @@ int parse_options(struct rarpd* rarpd, int argc, char *argv[])
 			rarpd->opts |= BOOT_FILE;
 			break;
 		default:
+			usage(NULL);
 			return -1;
 		}
 	}
@@ -687,14 +675,14 @@ int parse_args(struct rarpd* rarpd, char *argv[])
 {
 	if (rarpd->opts & LISTEN_ALL) {
 		if (argv[optind] != NULL) {
-			XLOG_ERR("found extra arguments, but -a given");
+			usage("found extra arguments, but -a given");
 			return -1;
 		}
 		return 0;
 	}
 
 	if (argv[optind] == NULL) {
-		XLOG_ERR("no interfaces specified, use -a for all interfaces");
+		usage("no interfaces specified, use -a for all interfaces");
 		return -1;
 	}
 
@@ -761,8 +749,8 @@ int daemonize()
 void cleanup_rarpd(struct rarpd *rarpd)
 {
 	unlink(PIDFILE);
-	free(rarpd->fds);
 	free(rarpd->link);
+	dispatcher_cleanup(&rarpd->dispatcher);
 }
 
 int main(int argc, char *argv[])
@@ -772,7 +760,10 @@ int main(int argc, char *argv[])
 
 	struct rarpd rarpd;
 
-	rarpd_init(&rarpd);
+	if (rarpd_init(&rarpd) != 0) {
+		return EXIT_FAILURE;
+	}
+
 	if (parse_options(&rarpd, argc, argv) != 0) {
 		return EXIT_FAILURE;
 	}
@@ -782,6 +773,7 @@ int main(int argc, char *argv[])
 	}
 
 	openlog("rarpd", LOG_PERROR|LOG_PID, LOG_DAEMON);
+
 	if (find_interfaces(&rarpd) != 0) {
 		return EXIT_FAILURE;
 	}
@@ -804,7 +796,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	poll_loop(&rarpd);
+	dispatcher_run(&rarpd.dispatcher);
 
 	cleanup_rarpd(&rarpd);
 	return 0;
