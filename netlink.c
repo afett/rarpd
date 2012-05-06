@@ -233,6 +233,7 @@ static void nl_parse_addr_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 	nl_addr_cb addr_cb;
 	size_t len;
 	in_addr_t *addr;
+	struct nl_addr nl_addr;
 
 	addr = NULL;
 	ifaddr = NLMSG_DATA(nlp);
@@ -255,7 +256,9 @@ static void nl_parse_addr_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 	}
 
 	addr_cb = (nl_addr_cb) cb->parse_cb;
-	addr_cb(ifaddr->ifa_index, *addr, cb->aux);
+	nl_addr.ifindex = ifaddr->ifa_index;
+	nl_addr.ifaddr = *addr;
+	addr_cb(&nl_addr , cb->aux);
 }
 
 static bool nl_parse(char *buf, ssize_t len, struct nl_cb *cb)

@@ -23,8 +23,13 @@ struct nl_link {
 	const struct ether_addr *ifaddr;
 };
 
+struct nl_addr {
+	int ifindex;
+	in_addr_t ifaddr;
+};
+
 typedef void (*nl_link_cb)(struct nl_link*, void *);
-typedef void (*nl_addr_cb)(int, in_addr_t, void *);
+typedef void (*nl_addr_cb)(struct nl_addr*, void *);
 typedef void (*nl_msg_parse)(struct nlmsghdr *nlp, struct nl_cb *);
 
 struct nl_cb {

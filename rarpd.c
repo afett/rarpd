@@ -64,6 +64,11 @@ struct link {
 	char buf[1500];
 };
 
+struct link_array {
+	size_t count;
+	struct link *link;
+};
+
 enum {
 	LISTEN_ALL = 1 << 0,
 	DEBUG_MODE = 1 << 1,
@@ -74,8 +79,7 @@ enum {
 
 struct rarpd {
 	struct nl_ctx nl_ctx;
-	size_t link_count;
-	struct link *link;
+	struct link_array links;
 	struct dispatcher dispatcher;
 	struct poll_handler *sighandler;
 	unsigned int opts;
@@ -90,6 +94,63 @@ bool in_argv(const char *name, char **ifname)
 		}
 	}
 	return false;
+}
+
+struct link* link_array_add(struct link_array *links)
+{
+	++links->count;
+	links->link = realloc(links->link,
+		links->count * sizeof(struct link));
+	return &links->link[links->count - 1];
+}
+
+typedef bool link_array_fun(struct link *, void *);
+bool link_array_foreach(struct link_array *links, link_array_fun *fun, void *aux)
+{
+	int i;
+	for (i = 0; i < links->count; ++i) {
+		if (!fun(&links->link[i], aux)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+typedef bool link_array_keep(struct link *, void *);
+void link_array_filter(struct link_array *links, link_array_keep *keep, void *aux)
+{
+	size_t i;
+
+	i = 0;
+	while (i < links->count) {
+		if (keep(&links->link[i], aux)) {
+			++i;
+			continue;
+		}
+
+		--links->count;
+		if (links->count != i) {
+			memcpy(&links->link[i],
+				&links->link[links->count],
+				sizeof(struct link));
+		}
+	}
+
+	if (links->count != 0) {
+		links->link = realloc(links->link,
+			links->count * sizeof(struct link));
+	} else {
+		free(links->link);
+		links->link = NULL;
+	}
+}
+
+void link_array_free(struct link_array *links)
+{
+	free(links->link);
+	links->link = NULL;
+	links->count = 0;
 }
 
 void add_link(struct nl_link *nl_link, void *aux)
@@ -115,43 +176,43 @@ void add_link(struct nl_link *nl_link, void *aux)
 
 	XLOG_DEBUG("adding link %s: %s",
 		nl_link->ifname, ether_ntoa(nl_link->ifaddr));
-	++rarpd->link_count;
-	rarpd->link = realloc(rarpd->link,
-		rarpd->link_count * sizeof(struct link));
-	link = &rarpd->link[rarpd->link_count - 1];
+	link = link_array_add(&rarpd->links);
 	link->ifindex = nl_link->ifindex;
 	snprintf(link->name, sizeof(link->name), "%s", nl_link->ifname);
 	memcpy(&link->ether_addr, nl_link->ifaddr, sizeof(struct ether_addr));
 	link->in_addr = 0;
 }
 
-void link_add_addr(int ifindex, in_addr_t addr, void *aux)
+bool link_add_addr(struct link* link, void *aux)
 {
-	size_t i;
-	struct rarpd *rarpd;
+	struct nl_addr *nl_addr;
 	char addrstr[INET_ADDRSTRLEN];
 	char used[INET_ADDRSTRLEN];
 
-	rarpd = (struct rarpd *) aux;
-
-	for (i = 0; i < rarpd->link_count; ++i) {
-		if (rarpd->link[i].ifindex != ifindex) {
-			continue;
-		}
-
-		inet_ntop(AF_INET, &addr, addrstr, sizeof(addrstr));
-		if (rarpd->link[i].in_addr != 0) {
-			inet_ntop(AF_INET, &rarpd->link[i].in_addr,
-				used, sizeof(used));
-			XLOG_WARNING("ignoring address %s for link %s using %s",
-				addrstr, rarpd->link[i].name, used);
-			continue;
-		}
-
-		XLOG_DEBUG("using address %s for link %s",
-			addrstr, rarpd->link[i].name);
-		rarpd->link[i].in_addr = addr;
+	nl_addr = (struct nl_addr *) aux;
+	if (link->ifindex != nl_addr->ifindex) {
+		return true;
 	}
+
+	inet_ntop(AF_INET, &nl_addr->ifaddr, addrstr, sizeof(addrstr));
+	if (link->in_addr != 0) {
+		inet_ntop(AF_INET, &link->in_addr, used, sizeof(used));
+		XLOG_WARNING("ignoring address %s for link %s using %s",
+			addrstr, link->name, used);
+		return true;
+	}
+
+	XLOG_DEBUG("using address %s for link %s", addrstr, link->name);
+	link->in_addr = nl_addr->ifaddr;
+	return true;
+}
+
+void add_addr(struct nl_addr *addr, void *aux)
+{
+	struct link_array *links;
+
+	links = (struct link_array *) aux;
+	link_array_foreach(links, link_add_addr, addr);
 }
 
 int get_addresses(struct rarpd *rarpd)
@@ -162,36 +223,14 @@ int get_addresses(struct rarpd *rarpd)
 		return -1;
 	}
 
-	nl_init_addr_cb(&cb, link_add_addr, rarpd);
+	nl_init_addr_cb(&cb, add_addr, &rarpd->links);
 	return nl_receive(&rarpd->nl_ctx, &cb);
 }
 
-void filter_links(struct rarpd *rarpd)
+bool has_addr(struct link *link, void *aux)
 {
-	size_t i;
-
-	i = 0;
-	while (i < rarpd->link_count) {
-		if (rarpd->link[i].in_addr != 0) {
-			++i;
-			continue;
-		}
-
-		--rarpd->link_count;
-		if (rarpd->link_count != i) {
-			memcpy(&rarpd->link[i],
-				&rarpd->link[rarpd->link_count],
-				sizeof(struct link));
-		}
-	}
-
-	if (rarpd->link_count != 0) {
-		rarpd->link = realloc(rarpd->link,
-			rarpd->link_count * sizeof(struct link));
-	} else {
-		free(rarpd->link);
-		rarpd->link = NULL;
-	}
+	(void) aux;
+	return link->in_addr != 0;
 }
 
 int get_links(struct rarpd *rarpd)
@@ -268,37 +307,34 @@ int open_socket()
 enum dispatch_action
 rarp_handler(int fd, short events, void *aux);
 
-int setup_links(struct rarpd *rarpd)
+bool setup_link(struct link *link, void *aux)
 {
-	size_t i;
 	int fd;
-	struct link *link;
+	struct dispatcher *dispatcher;
 
-	link = rarpd->link;
-	for (i = 0; i < rarpd->link_count; ++i, ++link) {
-		fd = open_socket();
-		if (fd < 0) {
-			goto err;
-		}
-
-		if (do_bind(fd, link->ifindex) != 0) {
-			goto err;
-		}
-
-		if (set_promisc(fd, link->ifindex) != 0) {
-			goto err;
-		}
-
-		link->handler = dispatcher_watch(
-			&rarpd->dispatcher, fd, rarp_handler, link);
-		link->handler->events = POLLIN;
+	fd = open_socket();
+	if (fd < 0) {
+		goto err;
 	}
 
-	return 0;
+	if (do_bind(fd, link->ifindex) != 0) {
+		goto err;
+	}
+
+	if (set_promisc(fd, link->ifindex) != 0) {
+		goto err;
+	}
+
+	dispatcher = (struct dispatcher *) aux;
+	link->handler = dispatcher_watch(
+		dispatcher, fd, rarp_handler, link);
+	link->handler->events = POLLIN;
+
+	return true;
 err:
 	close(fd);
 	XLOG_ERR("error setting up %s", link->name);
-	return -1;
+	return false;
 }
 
 void dump_packet(char *buf, size_t size)
@@ -752,7 +788,7 @@ int daemonize()
 void cleanup_rarpd(struct rarpd *rarpd)
 {
 	unlink(PIDFILE);
-	free(rarpd->link);
+	link_array_free(&rarpd->links);
 	dispatcher_cleanup(&rarpd->dispatcher);
 }
 
@@ -799,13 +835,13 @@ int rarpd(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	filter_links(&rarpd);
-	if (rarpd.link_count == 0) {
+	link_array_filter(&rarpd.links, has_addr, NULL);
+	if (rarpd.links.count == 0) {
 		XLOG_ERR("no usable links found");
 		return EXIT_FAILURE;
 	}
 
-	if (setup_links(&rarpd) != 0) {
+	if (!link_array_foreach(&rarpd.links, setup_link, &rarpd.dispatcher)) {
 		cleanup_rarpd(&rarpd);
 		return EXIT_FAILURE;
 	}
