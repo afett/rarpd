@@ -15,7 +15,15 @@ struct nl_cb;
 struct ether_addr;
 struct in_addr_t;
 
-typedef void (*nl_link_cb)(int, unsigned short, unsigned int, const struct ether_addr *, const char *, void *);
+struct nl_link {
+	int ifindex;
+	unsigned short iftype;
+	unsigned int ifflags;
+	const char *ifname;
+	const struct ether_addr *ifaddr;
+};
+
+typedef void (*nl_link_cb)(struct nl_link*, void *);
 typedef void (*nl_addr_cb)(int, in_addr_t, void *);
 typedef void (*nl_msg_parse)(struct nlmsghdr *nlp, struct nl_cb *);
 

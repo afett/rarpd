@@ -182,12 +182,10 @@ static void nl_parse_link_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 	nl_link_cb link_cb;
 	struct ifinfomsg *ifinfo;
 	struct rtattr *rtap;
-	char *name;
-	struct ether_addr *addr;
+	struct nl_link link;
 	size_t len;
 
-	name = NULL;
-	addr = NULL;
+	memset(&link, 0, sizeof(struct nl_link));
 	ifinfo = NLMSG_DATA(nlp);
 	rtap = IFLA_RTA(ifinfo);
 	len = IFLA_PAYLOAD(nlp);
@@ -195,14 +193,14 @@ static void nl_parse_link_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 	for (; RTA_OK(rtap, len); rtap = RTA_NEXT(rtap, len)) {
 		switch (rtap->rta_type) {
 		case IFLA_IFNAME:
-			name = (char *)RTA_DATA(rtap);
+			link.ifname = (char *)RTA_DATA(rtap);
 			break;
 		case IFLA_ADDRESS:
 			if (RTA_PAYLOAD(rtap) != sizeof(struct ether_addr)) {
 				XLOG_ERR("invalid ll address for %u", ifinfo->ifi_index);
 				return;
 			}
-			addr = (struct ether_addr *)RTA_DATA(rtap);
+			link.ifaddr = (struct ether_addr *)RTA_DATA(rtap);
 			break;
 		default:
 			/* XLOG_DEBUG("attr: %u", rtap->rta_type); */
@@ -210,18 +208,22 @@ static void nl_parse_link_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 		}
 	}
 
-	if (!name) {
+	if (!link.ifname) {
 		XLOG_ERR("could not get name for link %u", ifinfo->ifi_index);
 		return;
 	}
 
-	if (!addr) {
+	if (!link.ifaddr) {
 		XLOG_ERR("could not get ll addr for link %u", ifinfo->ifi_index);
 		return;
 	}
 
+	link.ifindex = ifinfo->ifi_index;
+	link.iftype = ifinfo->ifi_type;
+	link.ifflags = ifinfo->ifi_flags;
+
 	link_cb = (nl_link_cb) cb->parse_cb;
-	link_cb(ifinfo->ifi_index, ifinfo->ifi_type, ifinfo->ifi_flags, addr, name, cb->aux);
+	link_cb(&link, cb->aux);
 }
 
 static void nl_parse_addr_msg(struct nlmsghdr *nlp, struct nl_cb *cb)

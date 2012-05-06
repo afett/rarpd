@@ -92,36 +92,36 @@ bool in_argv(const char *name, char **ifname)
 	return false;
 }
 
-void add_link(int ifindex, unsigned short iftype, unsigned int ifflags,
-	const struct ether_addr *addr, const char *name, void *aux)
+void add_link(struct nl_link *nl_link, void *aux)
 {
 	struct rarpd *rarpd;
 	struct link *link;
 
 	rarpd = (struct rarpd *) aux;
-	if (!(rarpd->opts & LISTEN_ALL) && !in_argv(name, rarpd->ifname)) {
-		XLOG_DEBUG("skipping %s: not found in arguments", name);
+	if (!(rarpd->opts & LISTEN_ALL) && !in_argv(nl_link->ifname, rarpd->ifname)) {
+		XLOG_DEBUG("skipping %s: not found in arguments", nl_link->ifname);
 		return;
 	}
 
-	if (iftype != ARPHRD_ETHER) {
-		XLOG_DEBUG("skipping %s: no ethernet", name);
+	if (nl_link->iftype != ARPHRD_ETHER) {
+		XLOG_DEBUG("skipping %s: no ethernet", nl_link->ifname);
 		return;
 	}
 
-	if (!(ifflags & IFF_RUNNING)) {
-		XLOG_DEBUG("skipping %s: link is down", name);
+	if (!(nl_link->ifflags & IFF_RUNNING)) {
+		XLOG_DEBUG("skipping %s: link is down", nl_link->ifname);
 		return;
 	}
 
-	XLOG_DEBUG("adding link %s: %s", name, ether_ntoa(addr));
+	XLOG_DEBUG("adding link %s: %s",
+		nl_link->ifname, ether_ntoa(nl_link->ifaddr));
 	++rarpd->link_count;
 	rarpd->link = realloc(rarpd->link,
 		rarpd->link_count * sizeof(struct link));
 	link = &rarpd->link[rarpd->link_count - 1];
-	link->ifindex = ifindex;
-	snprintf(link->name, sizeof(link->name), "%s", name);
-	memcpy(&link->ether_addr, addr, sizeof(struct ether_addr));
+	link->ifindex = nl_link->ifindex;
+	snprintf(link->name, sizeof(link->name), "%s", nl_link->ifname);
+	memcpy(&link->ether_addr, nl_link->ifaddr, sizeof(struct ether_addr));
 	link->in_addr = 0;
 }
 
