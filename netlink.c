@@ -287,17 +287,3 @@ static bool nl_parse(char *buf, ssize_t len, struct nl_cb *cb)
 	}
 	return true;
 }
-
-#if 0
-static bool nl_add_attr(struct nlmsghdr *nlm, unsigned short type, size_t len, void *data)
-{
-	size_t offs = NLMSG_ALIGN(nlm->nlmsg_len);
-	struct rtattr *rta = (struct rtattr *) ((char*) nlm + offs);
-	rta->rta_type = type;
-	rta->rta_len = RTA_LENGTH(len);
-
-	memcpy(RTA_DATA(rta), data, len);
-	nlm->nlmsg_len = NLMSG_ALIGN(nlm->nlmsg_len) + RTA_LENGTH(len);
-	return RTA_OK(rta, RTA_LENGTH(len));
-}
-#endif
