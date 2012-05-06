@@ -33,41 +33,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <arpa/inet.h>
 #include <fcntl.h>
-#include <net/ethernet.h>
-#include <net/if.h>
-#include <net/if_arp.h>
 #include <netdb.h>
-#include <netinet/ether.h>
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
-#include <netpacket/packet.h>
-#include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/socket.h>
 
-#include "xlog.h"
 #include "dispatcher.h"
+#include "link.h"
 #include "netlink.h"
 #include "sighandler.h"
+#include "xlog.h"
 
 #define PIDFILE "/var/run/rarpd.pid"
-
-struct link {
-	int ifindex;
-	char name[IF_NAMESIZE + 1];
-	in_addr_t in_addr;
-	struct ether_addr ether_addr;
-	struct poll_handler *handler;
-	struct sockaddr_ll src;
-	char buf[1500];
-};
-
-struct link_array {
-	size_t count;
-	struct link *link;
-};
 
 enum {
 	LISTEN_ALL = 1 << 0,
@@ -94,63 +74,6 @@ bool in_argv(const char *name, char **ifname)
 		}
 	}
 	return false;
-}
-
-struct link* link_array_add(struct link_array *links)
-{
-	++links->count;
-	links->link = realloc(links->link,
-		links->count * sizeof(struct link));
-	return &links->link[links->count - 1];
-}
-
-typedef bool link_array_fun(struct link *, void *);
-bool link_array_foreach(struct link_array *links, link_array_fun *fun, void *aux)
-{
-	int i;
-	for (i = 0; i < links->count; ++i) {
-		if (!fun(&links->link[i], aux)) {
-			return false;
-		}
-	}
-
-	return true;
-}
-
-typedef bool link_array_keep(struct link *, void *);
-void link_array_filter(struct link_array *links, link_array_keep *keep, void *aux)
-{
-	size_t i;
-
-	i = 0;
-	while (i < links->count) {
-		if (keep(&links->link[i], aux)) {
-			++i;
-			continue;
-		}
-
-		--links->count;
-		if (links->count != i) {
-			memcpy(&links->link[i],
-				&links->link[links->count],
-				sizeof(struct link));
-		}
-	}
-
-	if (links->count != 0) {
-		links->link = realloc(links->link,
-			links->count * sizeof(struct link));
-	} else {
-		free(links->link);
-		links->link = NULL;
-	}
-}
-
-void link_array_free(struct link_array *links)
-{
-	free(links->link);
-	links->link = NULL;
-	links->count = 0;
 }
 
 void add_link(struct nl_link *nl_link, void *aux)
