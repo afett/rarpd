@@ -61,7 +61,7 @@ struct rarpd {
 	struct nl_ctx nl_ctx;
 	struct link_array links;
 	struct dispatcher dispatcher;
-	struct poll_handler *sighandler;
+	struct fd_handler sighandler;
 	unsigned int opts;
 	char **ifname;
 };
@@ -251,7 +251,7 @@ bool setup_link(struct link *link, void *aux)
 	dispatcher = (struct dispatcher *) aux;
 	link->handler = dispatcher_watch(
 		dispatcher, fd, rarp_handler, link);
-	link->handler->events = POLLIN;
+	dispatcher_flags(&link->handler, POLLIN);
 
 	return true;
 err:
@@ -487,7 +487,7 @@ void handle_request(int fd, struct link *link, bool check_bootable)
 	}
 
 	create_reply(arp_req, &ip, link);
-	link->handler->events = POLLOUT;
+	dispatcher_flags(&link->handler, POLLOUT);
 }
 
 int send_reply(int fd, struct link *link)
@@ -506,7 +506,7 @@ int send_reply(int fd, struct link *link)
 	}
 
 	XLOG_DEBUG("send %i octets on %s", ret, link->name);
-	link->handler->events = POLLIN;
+	dispatcher_flags(&link->handler, POLLIN);
 	return 0;
 }
 
@@ -566,7 +566,8 @@ int rarpd_init_signals(struct rarpd *rarpd)
 
 	rarpd->sighandler = dispatcher_watch(
 		&rarpd->dispatcher, signalfd, signal_handler, NULL);
-	rarpd->sighandler->events = POLLIN;
+
+	dispatcher_flags(&rarpd->sighandler, POLLIN);
 	return 0;
 }
 

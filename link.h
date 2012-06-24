@@ -16,7 +16,7 @@ struct link {
 	char name[IF_NAMESIZE + 1];
 	in_addr_t in_addr;
 	struct ether_addr ether_addr;
-	struct poll_handler *handler;
+	struct fd_handler handler;
 	struct sockaddr_ll src;
 	char buf[1500];
 };

@@ -31,6 +31,12 @@
 #include "xlog.h"
 #include "dispatcher.h"
 
+struct poll_handler {
+	short events;
+	io_handler *handler;
+	void *aux;
+};
+
 void dispatcher_init(struct dispatcher *dispatcher)
 {
 	memset(dispatcher, 0, sizeof(struct dispatcher));
@@ -43,14 +49,21 @@ void dispatcher_cleanup(struct dispatcher *dispatcher)
 	memset(dispatcher, 0, sizeof(struct dispatcher));
 }
 
-struct poll_handler*
+void dispatcher_flags(struct fd_handler *handler, short flags)
+{
+	handler->dispatcher->fds[handler->index].events = flags;
+}
+
+struct fd_handler
 dispatcher_watch(struct dispatcher *dispatcher, int fd,
 	io_handler *io_handler, void *aux)
 {
+	int index;
+	struct fd_handler handle;
 	struct poll_handler *handler;
 	struct pollfd *pollfd;
 
-	++dispatcher->nfds;
+	index = dispatcher->nfds++;
 	dispatcher->handler = realloc(dispatcher->handler,
 		dispatcher->nfds * sizeof(struct poll_handler));
 
@@ -61,15 +74,18 @@ dispatcher_watch(struct dispatcher *dispatcher, int fd,
 		exit(EXIT_FAILURE);
 	}
 
-	pollfd = &dispatcher->fds[dispatcher->nfds - 1];
+	pollfd = &dispatcher->fds[index];
 	pollfd->events = 0;
 	pollfd->revents = 0;
 	pollfd->fd = fd;
 
-	handler = &dispatcher->handler[dispatcher->nfds - 1];
+	handler = &dispatcher->handler[index];
 	handler->handler = io_handler;
 	handler->aux = aux;
-	return handler;
+
+	handle.index = index;
+	handle.dispatcher = dispatcher;
+	return handle;
 }
 
 typedef enum dispatch_action (foreach_fn)(struct poll_handler *, struct pollfd *);
