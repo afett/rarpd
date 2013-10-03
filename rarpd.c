@@ -181,7 +181,7 @@ int set_promisc(int fd, size_t ifindex)
 		&mreq, sizeof(struct packet_mreq));
 
 	if (ret != 0) {
-		XLOG_ERR("error setting promisc mode on link %u: %s",
+		XLOG_ERR("error setting promisc mode on link %zu: %s",
 			ifindex, strerror(errno));
 		return -1;
 	}
@@ -199,7 +199,7 @@ int do_bind(int fd, size_t ifindex)
 	addr.sll_ifindex = ifindex;
 	ret = bind(fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_ll));
 	if (ret == -1) {
-		XLOG_ERR("error binding socket on %u: %s",
+		XLOG_ERR("error binding socket on %zu: %s",
 			ifindex, strerror(errno));
 		return -1;
 	}
@@ -358,7 +358,7 @@ ssize_t read_request(int fd, struct sockaddr_ll *addr, char *buf, size_t size)
 		return -1;
 	}
 
-	XLOG_DEBUG("read %i octets", ret);
+	XLOG_DEBUG("read %zi octets", ret);
 	return ret;
 }
 
@@ -505,7 +505,7 @@ int send_reply(int fd, struct link *link)
 		return -1;
 	}
 
-	XLOG_DEBUG("send %i octets on %s", ret, link->name);
+	XLOG_DEBUG("send %zi octets on %s", ret, link->name);
 	dispatcher_flags(&link->handler, POLLIN);
 	return 0;
 }
