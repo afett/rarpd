@@ -9,7 +9,7 @@
 #include <netinet/ether.h>
 #include <netpacket/packet.h>
 
-struct poll_handler;
+#include "dispatcher.h"
 
 struct link {
 	int ifindex;
