@@ -264,12 +264,10 @@ static void nl_parse_addr_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 static bool nl_parse(char *buf, ssize_t len, struct nl_cb *cb)
 {
 	struct nlmsghdr *nlp;
-	struct rtmsg *rtp;
 	struct nlmsgerr *err;
 
 	nlp = (struct nlmsghdr *) buf;
 	for(;NLMSG_OK(nlp, len);nlp=NLMSG_NEXT(nlp, len)) {
-		rtp = (struct rtmsg *) NLMSG_DATA(nlp);
 		switch (nlp->nlmsg_type) {
 		case NLMSG_ERROR:
 			err = (struct nlmsgerr *) NLMSG_DATA(nlp);
