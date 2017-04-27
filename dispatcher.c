@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Andreas Fett.
+ * Copyright (c) 2012, 2017 Andreas Fett.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -58,12 +58,7 @@ struct fd_handler
 dispatcher_watch(struct dispatcher *dispatcher, int fd,
 	io_handler *io_handler, void *aux)
 {
-	int index;
-	struct fd_handler handle;
-	struct poll_handler *handler;
-	struct pollfd *pollfd;
-
-	index = dispatcher->nfds++;
+	int index = dispatcher->nfds++;
 	dispatcher->handler = realloc(dispatcher->handler,
 		dispatcher->nfds * sizeof(struct poll_handler));
 
@@ -74,15 +69,16 @@ dispatcher_watch(struct dispatcher *dispatcher, int fd,
 		exit(EXIT_FAILURE);
 	}
 
-	pollfd = &dispatcher->fds[index];
+	struct pollfd *pollfd = &dispatcher->fds[index];
 	pollfd->events = 0;
 	pollfd->revents = 0;
 	pollfd->fd = fd;
 
-	handler = &dispatcher->handler[index];
+	struct poll_handler *handler = &dispatcher->handler[index];
 	handler->handler = io_handler;
 	handler->aux = aux;
 
+	struct fd_handler handle;
 	handle.index = index;
 	handle.dispatcher = dispatcher;
 	return handle;
@@ -93,15 +89,10 @@ typedef enum dispatch_action (foreach_fn)(struct poll_handler *, struct pollfd *
 static enum dispatch_action
 foreach_handler(struct dispatcher *dispatcher, foreach_fn *fn)
 {
-	struct pollfd *pollfd;
-	struct poll_handler *handler;
-	enum dispatch_action action;
-	nfds_t i;
-
-	action = DISPATCH_CONTINUE;
-	pollfd = dispatcher->fds;
-	handler = dispatcher->handler;
-	for (i = 0; i < dispatcher->nfds; ++i, ++pollfd, ++handler) {
+	enum dispatch_action action = DISPATCH_CONTINUE;
+	struct pollfd *pollfd = dispatcher->fds;
+	struct poll_handler *handler = dispatcher->handler;
+	for (nfds_t i = 0; i < dispatcher->nfds; ++i, ++pollfd, ++handler) {
 		action = fn(handler, pollfd);
 		if (action == DISPATCH_ABORT) {
 			break;
@@ -136,11 +127,11 @@ set_events(struct poll_handler *handler, struct pollfd *pollfd)
 
 int dispatcher_run(struct dispatcher *dispatcher)
 {
-	int ret;
 
 	for(;;) {
 		foreach_handler(dispatcher, set_events);
 
+		int ret;
 		do {
 			ret = poll(dispatcher->fds, dispatcher->nfds, -1);
 		} while (ret < 0 && errno == EINTR);

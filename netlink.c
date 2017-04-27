@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Andreas Fett.
+ * Copyright (c) 2012, 2017 Andreas Fett.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -43,8 +43,6 @@ static bool nl_add_attr(struct nlmsghdr *nlm, unsigned short type, size_t len, v
 
 int nl_open(struct nl_ctx *nl_ctx)
 {
-	int ret;
-
 	nl_ctx->fd = socket(AF_NETLINK, SOCK_DGRAM, NETLINK_ROUTE);
 	if (nl_ctx->fd < 0)  {
 		XLOG_ERR("error opening netlink socket: %s", strerror(errno));
@@ -56,7 +54,7 @@ int nl_open(struct nl_ctx *nl_ctx)
 	nl_ctx->sa.nl_pid = 0;
 	nl_ctx->sa.nl_groups = 0;
 
-	ret = bind(nl_ctx->fd, (struct sockaddr *) &nl_ctx->sa, sizeof(struct sockaddr_nl));
+	int ret = bind(nl_ctx->fd, (struct sockaddr *) &nl_ctx->sa, sizeof(struct sockaddr_nl));
 	if (ret < 0)  {
 		XLOG_ERR("error binding netlink socket: %s", strerror(errno));
 		return -1;
@@ -99,12 +97,10 @@ void nl_init_link_cb(struct nl_cb *nl_cb, nl_link_cb link_cb, void *aux)
 
 int nl_list_links(struct nl_ctx *nl_ctx)
 {
-	int ret;
-	size_t size;
 	char buf[1024];
 
-	size = nl_create_msg(buf, sizeof(buf), RTM_GETLINK, NLM_F_REQUEST|NLM_F_DUMP, PF_PACKET);
-	ret = send(nl_ctx->fd, buf, size, 0);
+	size_t size = nl_create_msg(buf, sizeof(buf), RTM_GETLINK, NLM_F_REQUEST|NLM_F_DUMP, PF_PACKET);
+	int ret = send(nl_ctx->fd, buf, size, 0);
 	if (ret != size) {
 		XLOG_ERR("error sending netlink message: %s", strerror(errno));
 		return -1;
@@ -123,13 +119,11 @@ void nl_init_addr_cb(struct nl_cb *nl_cb, nl_addr_cb addr_cb, void *aux)
 
 int nl_list_addr(struct nl_ctx *nl_ctx)
 {
-	int ret;
-	size_t size;
 	char buf[1024];
 
-	size = nl_create_msg(buf, sizeof(buf), RTM_GETADDR, NLM_F_REQUEST|NLM_F_DUMP, PF_INET);
+	size_t size = nl_create_msg(buf, sizeof(buf), RTM_GETADDR, NLM_F_REQUEST|NLM_F_DUMP, PF_INET);
 
-	ret = send(nl_ctx->fd, buf, size, 0);
+	int ret = send(nl_ctx->fd, buf, size, 0);
 	if (ret != size) {
 		XLOG_ERR("error sending netlink message: %s", strerror(errno));
 		return -1;
@@ -140,18 +134,16 @@ int nl_list_addr(struct nl_ctx *nl_ctx)
 
 int nl_set_neigh(struct nl_ctx *nl_ctx, size_t index, struct ether_addr *ether_addr, in_addr_t *in_addr)
 {
-	int ret;
-	size_t size;
 	char buf[1024];
 
-	size = nl_create_msg(buf, sizeof(buf), RTM_NEWNEIGH,
+	size_t size = nl_create_msg(buf, sizeof(buf), RTM_NEWNEIGH,
 		NLM_F_REQUEST|NLM_F_REPLACE|NLM_F_CREATE, PF_INET);
 	// nl_add_attr((struct nlmsghdr *) data, NDA_DST, sizeof(in_addr_r), in_addr);
 	// nl_add_attr((struct nlmsghdr *) data, NDA_LLADDR, sizeof(struct ether_addr), ether_addr);
 	// fill in ndm_ifindex from link
 	// set ndm_state NUD_PERMANENT
 
-	ret = send(nl_ctx->fd, buf, size, 0);
+	int ret = send(nl_ctx->fd, buf, size, 0);
 	if (ret != size) {
 		XLOG_ERR("error sending netlink message: %s", strerror(errno));
 		return -1;
@@ -162,16 +154,13 @@ int nl_set_neigh(struct nl_ctx *nl_ctx, size_t index, struct ether_addr *ether_a
 
 static size_t nl_create_msg(char *buf, size_t size, uint16_t type, uint16_t flags, int family)
 {
-	struct nlmsghdr *nlp;
-	struct rtgenmsg *msgp;
-
 	memset(buf, 0, size);
-	nlp = (struct nlmsghdr *) buf;
+	struct nlmsghdr *nlp = (struct nlmsghdr *) buf;
 
 	nlp->nlmsg_flags = flags;
 	nlp->nlmsg_type = type;
 	nlp->nlmsg_len = NLMSG_LENGTH(sizeof(struct rtmsg));
-	msgp = (struct rtgenmsg *) NLMSG_DATA(nlp);
+	struct rtgenmsg *msgp = (struct rtgenmsg *) NLMSG_DATA(nlp);
 	msgp->rtgen_family = family;
 
 	return nlp->nlmsg_len;
@@ -179,16 +168,12 @@ static size_t nl_create_msg(char *buf, size_t size, uint16_t type, uint16_t flag
 
 static void nl_parse_link_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 {
-	nl_link_cb link_cb;
-	struct ifinfomsg *ifinfo;
-	struct rtattr *rtap;
 	struct nl_link link;
-	size_t len;
-
 	memset(&link, 0, sizeof(struct nl_link));
-	ifinfo = NLMSG_DATA(nlp);
-	rtap = IFLA_RTA(ifinfo);
-	len = IFLA_PAYLOAD(nlp);
+
+	struct ifinfomsg *ifinfo = NLMSG_DATA(nlp);
+	struct rtattr *rtap = IFLA_RTA(ifinfo);
+	size_t len = IFLA_PAYLOAD(nlp);
 
 	for (; RTA_OK(rtap, len); rtap = RTA_NEXT(rtap, len)) {
 		switch (rtap->rta_type) {
@@ -222,23 +207,16 @@ static void nl_parse_link_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 	link.iftype = ifinfo->ifi_type;
 	link.ifflags = ifinfo->ifi_flags;
 
-	link_cb = (nl_link_cb) cb->parse_cb;
+	nl_link_cb link_cb = (nl_link_cb) cb->parse_cb;
 	link_cb(&link, cb->aux);
 }
 
 static void nl_parse_addr_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 {
-	struct ifaddrmsg *ifaddr;
-	struct rtattr *rtap;
-	nl_addr_cb addr_cb;
-	size_t len;
-	in_addr_t *addr;
-	struct nl_addr nl_addr;
-
-	addr = NULL;
-	ifaddr = NLMSG_DATA(nlp);
-	rtap = IFLA_RTA(ifaddr);
-	len = IFLA_PAYLOAD(nlp);
+	in_addr_t *addr = NULL;
+	struct ifaddrmsg *ifaddr = NLMSG_DATA(nlp);
+	struct rtattr *rtap = IFLA_RTA(ifaddr);
+	size_t len = IFLA_PAYLOAD(nlp);
 
 	for (; RTA_OK(rtap, len); rtap = RTA_NEXT(rtap, len)) {
 		switch (rtap->rta_type) {
@@ -255,23 +233,23 @@ static void nl_parse_addr_msg(struct nlmsghdr *nlp, struct nl_cb *cb)
 		return;
 	}
 
-	addr_cb = (nl_addr_cb) cb->parse_cb;
+	struct nl_addr nl_addr;
 	nl_addr.ifindex = ifaddr->ifa_index;
 	nl_addr.ifaddr = *addr;
+
+	nl_addr_cb addr_cb = (nl_addr_cb) cb->parse_cb;
 	addr_cb(&nl_addr , cb->aux);
 }
 
 static bool nl_parse(char *buf, ssize_t len, struct nl_cb *cb)
 {
-	struct nlmsghdr *nlp;
-	struct nlmsgerr *err;
-
-	nlp = (struct nlmsghdr *) buf;
+	struct nlmsghdr *nlp = (struct nlmsghdr *) buf;
 	for(;NLMSG_OK(nlp, len);nlp=NLMSG_NEXT(nlp, len)) {
 		switch (nlp->nlmsg_type) {
-		case NLMSG_ERROR:
-			err = (struct nlmsgerr *) NLMSG_DATA(nlp);
+		case NLMSG_ERROR: {
+			struct nlmsgerr *err = (struct nlmsgerr *) NLMSG_DATA(nlp);
 			XLOG_ERR("received netlink error %s", strerror(-err->error));
+		}
 		case NLMSG_DONE:
 			return false;
 		default:

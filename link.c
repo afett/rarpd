@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Andreas Fett.
+ * Copyright (c) 2012, 2017 Andreas Fett.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -39,8 +39,7 @@ struct link* link_array_add(struct link_array *links)
 
 bool link_array_foreach(struct link_array *links, link_array_fun *fun, void *aux)
 {
-	int i;
-	for (i = 0; i < links->count; ++i) {
+	for (int i = 0; i < links->count; ++i) {
 		if (!fun(&links->link[i], aux)) {
 			return false;
 		}
@@ -51,9 +50,8 @@ bool link_array_foreach(struct link_array *links, link_array_fun *fun, void *aux
 
 void link_array_filter(struct link_array *links, link_array_keep *keep, void *aux)
 {
-	size_t i;
+	size_t i = 0;
 
-	i = 0;
 	while (i < links->count) {
 		if (keep(&links->link[i], aux)) {
 			++i;

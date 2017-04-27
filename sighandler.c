@@ -16,8 +16,7 @@ static void sig_handler(int signo)
 
 static int create_pipe(int fds[])
 {
-	int ret;
-	ret = pipe(fds);
+	int ret = pipe(fds);
 	if (ret != 0) {
 		XLOG_ERR("pipe() failed: %s", strerror(errno));
 		return -1;
@@ -48,16 +47,15 @@ err:
 
 int install_signal_fd()
 {
-	int ret;
 	int fds[2];
-	struct sigaction sigact;
-
-	ret = create_pipe(fds);
+	int ret = create_pipe(fds);
 	if (ret != 0) {
 		return -1;
 	}
 
 	signal_fd = fds[1];
+
+	struct sigaction sigact;
 	memset(&sigact,0,sizeof(struct sigaction));
 	sigemptyset(&sigact.sa_mask);
         sigact.sa_handler = sig_handler;

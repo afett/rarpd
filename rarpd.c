@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Andreas Fett.
+ * Copyright (c) 2012, 2017 Andreas Fett.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -78,10 +78,7 @@ bool in_argv(const char *name, char **ifname)
 
 void add_link(struct nl_link *nl_link, void *aux)
 {
-	struct rarpd *rarpd;
-	struct link *link;
-
-	rarpd = (struct rarpd *) aux;
+	struct rarpd *rarpd = (struct rarpd *) aux;
 	if (!(rarpd->opts & LISTEN_ALL) && !in_argv(nl_link->ifname, rarpd->ifname)) {
 		XLOG_DEBUG("skipping %s: not found in arguments", nl_link->ifname);
 		return;
@@ -99,7 +96,7 @@ void add_link(struct nl_link *nl_link, void *aux)
 
 	XLOG_DEBUG("adding link %s: %s",
 		nl_link->ifname, ether_ntoa(nl_link->ifaddr));
-	link = link_array_add(&rarpd->links);
+	struct link *link = link_array_add(&rarpd->links);
 	link->ifindex = nl_link->ifindex;
 	snprintf(link->name, sizeof(link->name), "%s", nl_link->ifname);
 	memcpy(&link->ether_addr, nl_link->ifaddr, sizeof(struct ether_addr));
@@ -108,17 +105,16 @@ void add_link(struct nl_link *nl_link, void *aux)
 
 bool link_add_addr(struct link* link, void *aux)
 {
-	struct nl_addr *nl_addr;
-	char addrstr[INET_ADDRSTRLEN];
-	char used[INET_ADDRSTRLEN];
-
-	nl_addr = (struct nl_addr *) aux;
+	struct nl_addr *nl_addr = (struct nl_addr *) aux;
 	if (link->ifindex != nl_addr->ifindex) {
 		return true;
 	}
 
+	char addrstr[INET_ADDRSTRLEN];
 	inet_ntop(AF_INET, &nl_addr->ifaddr, addrstr, sizeof(addrstr));
+
 	if (link->in_addr != 0) {
+		char used[INET_ADDRSTRLEN];
 		inet_ntop(AF_INET, &link->in_addr, used, sizeof(used));
 		XLOG_WARNING("ignoring address %s for link %s using %s",
 			addrstr, link->name, used);
@@ -132,20 +128,17 @@ bool link_add_addr(struct link* link, void *aux)
 
 void add_addr(struct nl_addr *addr, void *aux)
 {
-	struct link_array *links;
-
-	links = (struct link_array *) aux;
+	struct link_array *links = (struct link_array *) aux;
 	link_array_foreach(links, link_add_addr, addr);
 }
 
 int get_addresses(struct rarpd *rarpd)
 {
-	struct nl_cb cb;
-
 	if (nl_list_addr(&rarpd->nl_ctx) != 0) {
 		return -1;
 	}
 
+	struct nl_cb cb;
 	nl_init_addr_cb(&cb, add_addr, &rarpd->links);
 	return nl_receive(&rarpd->nl_ctx, &cb);
 }
@@ -158,28 +151,24 @@ bool has_addr(struct link *link, void *aux)
 
 int get_links(struct rarpd *rarpd)
 {
-	struct nl_cb cb;
-
 	if (nl_list_links(&rarpd->nl_ctx) != 0) {
 		return -1;
 	}
 
+	struct nl_cb cb;
 	nl_init_link_cb(&cb, add_link, rarpd);
 	return nl_receive(&rarpd->nl_ctx, &cb);
 }
 
 int set_promisc(int fd, size_t ifindex)
 {
-	int ret;
 	struct packet_mreq mreq;
-
 	memset(&mreq, 0, sizeof(struct packet_mreq));
 	mreq.mr_ifindex = ifindex;
 	mreq.mr_type = PACKET_MR_PROMISC;
 
-	ret = setsockopt(fd, SOL_PACKET, PACKET_ADD_MEMBERSHIP,
+	int ret = setsockopt(fd, SOL_PACKET, PACKET_ADD_MEMBERSHIP,
 		&mreq, sizeof(struct packet_mreq));
-
 	if (ret != 0) {
 		XLOG_ERR("error setting promisc mode on link %zu: %s",
 			ifindex, strerror(errno));
@@ -191,13 +180,12 @@ int set_promisc(int fd, size_t ifindex)
 
 int do_bind(int fd, size_t ifindex)
 {
-	int ret;
 	struct sockaddr_ll addr;
-
 	memset(&addr, 0, sizeof(struct sockaddr_ll));
 	addr.sll_family = PF_PACKET;
 	addr.sll_ifindex = ifindex;
-	ret = bind(fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_ll));
+
+	int ret = bind(fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_ll));
 	if (ret == -1) {
 		XLOG_ERR("error binding socket on %zu: %s",
 			ifindex, strerror(errno));
@@ -209,9 +197,7 @@ int do_bind(int fd, size_t ifindex)
 
 int open_socket()
 {
-	int fd;
-
-	fd = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_RARP));
+	int fd = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_RARP));
 	if (fd < 0) {
 		XLOG_ERR("error opening socket %s", strerror(errno));
 		return -1;
@@ -232,10 +218,7 @@ rarp_handler(int fd, short events, void *aux);
 
 bool setup_link(struct link *link, void *aux)
 {
-	int fd;
-	struct dispatcher *dispatcher;
-
-	fd = open_socket();
+	int fd = open_socket();
 	if (fd < 0) {
 		goto err;
 	}
@@ -248,7 +231,7 @@ bool setup_link(struct link *link, void *aux)
 		goto err;
 	}
 
-	dispatcher = (struct dispatcher *) aux;
+	struct dispatcher *dispatcher = (struct dispatcher *) aux;
 	link->handler = dispatcher_watch(
 		dispatcher, fd, rarp_handler, link);
 	dispatcher_flags(&link->handler, POLLIN);
@@ -262,9 +245,7 @@ err:
 
 void dump_packet(char *buf, size_t size)
 {
-	size_t i;
-
-	for (i = 0; i < size; ++i) {
+	for (size_t i = 0; i < size; ++i) {
 		fprintf(stderr, "%02x ", (unsigned char) buf[i]);
 		if (((i+1) % 16) == 0) {
 			fprintf(stderr, "%s", "\n");
@@ -345,11 +326,8 @@ bool check_request(const struct ether_arp *req, struct sockaddr_ll *addr)
 
 ssize_t read_request(int fd, struct sockaddr_ll *addr, char *buf, size_t size)
 {
-	ssize_t ret;
-	socklen_t addrlen;
-	addrlen = sizeof(struct sockaddr_ll);
-
-	ret = recvfrom(fd, buf, size, 0, (struct sockaddr *)addr, &addrlen);
+	socklen_t addrlen = sizeof(struct sockaddr_ll);
+	ssize_t ret = recvfrom(fd, buf, size, 0, (struct sockaddr *)addr, &addrlen);
 	if (ret < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
 			return 0;
@@ -369,11 +347,7 @@ ssize_t read_request(int fd, struct sockaddr_ll *addr, char *buf, size_t size)
  */
 int resolve(struct ether_addr *addr, struct in_addr *in_addr)
 {
-	int ret;
 	char hostname[4096];
-	struct addrinfo *ai, hints;
-	struct sockaddr_in *sa;
-
 	memset(hostname, 0, sizeof(hostname));
 	/*
 	   This is not really safe, at the time of writing glibc uses
@@ -381,7 +355,7 @@ int resolve(struct ether_addr *addr, struct in_addr *in_addr)
 	   parse /etc/ethers by ourselves but then we would loose
 	   nsswitch support. Alas RARP support without NIS is no fun :-(
 	*/
-	ret = ether_ntohost(hostname, addr);
+	int ret = ether_ntohost(hostname, addr);
 	if (ret != 0) {
 		XLOG_DEBUG("failed to lookup %s", ether_ntoa(addr));
 		return -1;
@@ -389,10 +363,12 @@ int resolve(struct ether_addr *addr, struct in_addr *in_addr)
 
 	XLOG_DEBUG("lookup for %s returned %s", ether_ntoa(addr), hostname);
 
+	struct addrinfo hints;
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_flags = AI_ADDRCONFIG;
-	ai = NULL;
+
+	struct addrinfo *ai = NULL;
 	ret = getaddrinfo(hostname, NULL, &hints, &ai);
 	if (ret != 0) {
 		XLOG_DEBUG("could not resolve '%s': %s\n", hostname,
@@ -400,7 +376,7 @@ int resolve(struct ether_addr *addr, struct in_addr *in_addr)
 		return -1;
 	}
 
-	sa = (struct sockaddr_in *)(ai->ai_addr);
+	struct sockaddr_in *sa = (struct sockaddr_in *)(ai->ai_addr);
 	memcpy(in_addr, &(sa->sin_addr), sizeof(struct in_addr));
 
 	return 0;
@@ -423,19 +399,17 @@ void create_reply(struct ether_arp *reply, struct in_addr *ip, struct link *link
  */
 bool is_bootable(struct in_addr in)
 {
-	DIR *dir;
-	struct dirent *entry;
-	char name[9];
 	const char bootdir[] = "/tftpboot";
-
+	char name[9];
 	snprintf(name, sizeof(name), "%08X", ntohl(*(uint32_t*)(&in)));
 	XLOG_DEBUG("looking for file matching %s in %s", name, bootdir);
 
-	dir = opendir(bootdir);
+	DIR *dir = opendir(bootdir);
 	if (dir == NULL) {
 		return false;
 	}
 
+	struct dirent *entry;
 	do {
 		entry = readdir(dir);
 	} while (entry != NULL && strncmp(name, entry->d_name, 8) != 0);
@@ -446,15 +420,10 @@ bool is_bootable(struct in_addr in)
 
 void handle_request(int fd, struct link *link, bool check_bootable)
 {
-	int ret;
-	ssize_t size;
-	struct ether_arp *arp_req;
-	struct in_addr ip;
-
 	memset(link->buf, 0, sizeof(link->buf));
 	memset(&link->src, 0, sizeof(link->src));
 
-	size = read_request(fd,
+	ssize_t size = read_request(fd,
 		&link->src, link->buf, sizeof(link->buf));
 
 	if (size <= 0) {
@@ -470,13 +439,14 @@ void handle_request(int fd, struct link *link, bool check_bootable)
 		return;
 	}
 
-	arp_req = (struct ether_arp *)link->buf;
+	struct ether_arp *arp_req = (struct ether_arp *)link->buf;
 	if (!check_request(arp_req, &link->src)) {
 		return;
 	}
 
+	struct in_addr ip;
 	memset(&ip, 0, sizeof(in_addr_t));
-	ret = resolve((struct ether_addr*)&arp_req->arp_tha, &ip);
+	int ret = resolve((struct ether_addr*)&arp_req->arp_tha, &ip);
 	if (ret != 0) {
 		return;
 	}
@@ -492,11 +462,8 @@ void handle_request(int fd, struct link *link, bool check_bootable)
 
 int send_reply(int fd, struct link *link)
 {
-	ssize_t ret;
-
-	ret = sendto(fd, link->buf, sizeof(struct ether_arp), 0,
+	ssize_t ret = sendto(fd, link->buf, sizeof(struct ether_arp), 0,
 		(struct sockaddr *)&link->src, sizeof(struct sockaddr_ll));
-
 	if (ret < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
 			return 0;
@@ -513,9 +480,7 @@ int send_reply(int fd, struct link *link)
 enum dispatch_action
 rarp_handler(int fd, short events, void *aux)
 {
-	struct link *link;
-
-	link = (struct link*) aux;
+	struct link *link = (struct link*) aux;
 	XLOG_DEBUG("received poll event for %s", link->name);
 
 	if (events & POLLIN) {
@@ -535,10 +500,8 @@ signal_handler(int fd, short events, void *aux)
 	(void) events;
 	(void) aux;
 
-	int signo;
 	int ret;
-
-	signo = 0;
+	int signo = 0;
 	do {
 		ret = read(fd, &signo, sizeof(signo));
 	} while (ret < 0 && errno == EINTR);
@@ -557,9 +520,7 @@ void rarpd_init(struct rarpd *rarpd)
 
 int rarpd_init_signals(struct rarpd *rarpd)
 {
-	int signalfd;
-
-	signalfd = install_signal_fd();
+	int signalfd = install_signal_fd();
 	if (signalfd < 0) {
 		return -1;
 	}
@@ -573,16 +534,13 @@ int rarpd_init_signals(struct rarpd *rarpd)
 
 int write_pidfile()
 {
-	int fd;
-	FILE *pidfile;
-
-	fd = open(PIDFILE, O_WRONLY|O_CLOEXEC|O_CREAT|O_EXCL, 0644);
+	int fd = open(PIDFILE, O_WRONLY|O_CLOEXEC|O_CREAT|O_EXCL, 0644);
 	if (fd < 0) {
 		XLOG_ERR("could not open pidfile: %s", strerror(errno));
 		return -1;
 	}
 
-	pidfile = fdopen(fd, "w");
+	FILE *pidfile = fdopen(fd, "w");
 	if (pidfile == NULL) {
 		XLOG_ERR("could not fdopen pidfile: %s", strerror(errno));
 		return -1;
@@ -604,10 +562,8 @@ void usage(const char* msg)
 
 int parse_options(struct rarpd* rarpd, int argc, char *argv[])
 {
-	int opt;
-
 	for (;;) {
-		opt = getopt(argc, argv, "adflt");
+		int opt = getopt(argc, argv, "adflt");
 		switch (opt) {
 		case -1:
 			return 0;
@@ -672,11 +628,7 @@ int find_interfaces(struct rarpd *rarpd)
 
 int daemonize()
 {
-	int ret;
-	int fd;
-	pid_t pid;
-
-	pid = fork();
+	pid_t pid = fork();
 	if (pid < 0) {
 		exit(EXIT_FAILURE);
 	}
@@ -689,20 +641,20 @@ int daemonize()
 		return -1;
 	}
 
-	ret = setsid();
+	int ret = setsid();
 	if (ret == -1) {
 		XLOG_ERR("failed to set session id: %s", strerror(errno));
 		unlink(PIDFILE);
 		return -1;
 	}
 
-	for (fd = getdtablesize(); fd >= 0; --fd) {
+	for (int fd = getdtablesize(); fd >= 0; --fd) {
 		 close(fd);
 	}
 
 	chdir("/");
 
-	fd = open("/dev/null", O_RDWR);
+	int fd = open("/dev/null", O_RDWR);
 	dup(fd);
 	dup(fd);
 
@@ -718,9 +670,7 @@ void cleanup_rarpd(struct rarpd *rarpd)
 
 void init_syslog(struct rarpd *rarpd)
 {
-	int logopt;
-
-	logopt = LOG_PID;
+	int logopt = LOG_PID;
 	if (rarpd->opts & DEBUG_MODE) {
 		logopt |= LOG_PERROR;
 	}
@@ -734,7 +684,6 @@ void init_syslog(struct rarpd *rarpd)
 int rarpd(int argc, char *argv[])
 {
 	struct rarpd rarpd;
-
 	rarpd_init(&rarpd);
 
 	if (parse_options(&rarpd, argc, argv) != 0) {
