@@ -1,6 +1,6 @@
 TARGET=rarpd
 
-CFLAGS=-std=c99 -pedantic -g -O0 -Wall -Werror
+CFLAGS=-std=c11 -pedantic -g -O0 -Wall -Werror
 CPPFLAGS=-D_GNU_SOURCE
 LDFLAGS=
 
